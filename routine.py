@@ -15,7 +15,7 @@ def get_zones(zone_names=None):
     l = []
     if zone_names is None:
         for f in os.listdir(BASE):
-            if os.path.isdir(os.path.join(BASE, f)):
+            if os.path.isdir(os.path.join(BASE, f)) and not f.startswith('.'):
                 l.append(Zone(f))
     else:
         for name in zone_names:
