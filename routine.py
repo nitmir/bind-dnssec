@@ -4,7 +4,7 @@ import os
 import sys
 import datetime
 import subprocess 
-
+import argparse
 from functools import total_ordering
 
 BASE = "/etc/bind/keys"
@@ -258,23 +258,29 @@ class Key(object):
 
 if __name__ == '__main__':
     try:
-        zones = []
-        for arg in sys.argv[1:]:
-            if not arg.startswith('-'):
-                zones.append(arg)
-        if '-m' in sys.argv and zones:
+        parser = argparse.ArgumentParser()
+        parser.add_argument('zone', nargs='*', help='zone name')
+        parser.add_argument('--make', '-m', action='store_true', help='Create keys for each supplied zone')
+        parser.add_argument('--cron', '-c', action='store_true', help='Perform maintenance for each supplied zone or for all zones if no zone supplied')
+        parser.add_argument('-ds', action='store_true', help='Show DS for each supplied zone or for all zones if no zone supplied')
+        parser.add_argument('-key', action='store_true', help='Show DNSKEY for each zone supplied zone or for all zones if no zone supplied')
+        args = parser.parse_args()
+        zones = args.zone
+        if args.make:
             for zone in zones:
                 Zone.create(zone)
         zones = get_zones(zones if zones else None)
-        if '-c' in sys.argv:
+        if args.cron:
             for zone in zones:
                 zone.do_zsk()
-        if '-ds' in sys.argv:
+        if args.ds:
             for zone in zones:
                 zone.ds()
-        if '-key' in sys.argv:
+        if args.key:
             for zone in zones:
                 zone.key()
+        if not any([args.make, args.cron, args.ds, args.key]):
+            parser.print_help()
     except ValueError as error:
         sys.stderr.write("%s\n" % error)
         sys.exit(1)
