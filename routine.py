@@ -4,7 +4,7 @@
 import os
 import sys
 import datetime
-import subprocess 
+import subprocess
 import argparse
 from functools import total_ordering
 
@@ -44,8 +44,13 @@ def get_zones(zone_names=None):
             l.append(Zone(name))
     return l
 
+
 def settime(path, flag, date):
-    cmd = ["/usr/sbin/dnssec-settime", "-i", str(int(INTERVAL.total_seconds())), "-%s" % flag, date, path]
+    cmd = [
+        "/usr/sbin/dnssec-settime",
+        "-i", str(int(INTERVAL.total_seconds())),
+        "-%s" % flag, date, path
+    ]
     p = subprocess.Popen(cmd, stderr=subprocess.PIPE, stdout=subprocess.PIPE)
     err = p.communicate()[1]
     if p.returncode != 0:
@@ -53,18 +58,21 @@ def settime(path, flag, date):
     if err:
         sys.stderr.write("%s\n" % err)
 
+
 def bind_chown(path):
     os.chown(path, 104, -1)
-    for root, dirs, files in os.walk(path):  
-        for momo in dirs:  
+    for root, dirs, files in os.walk(path):
+        for momo in dirs:
             os.chown(os.path.join(root, momo), 104, -1)
         for momo in files:
             os.chown(os.path.join(root, momo), 104, -1)
+
 
 def bind_reload():
     cmd = ["/usr/sbin/rndc", "reload"]
     p = subprocess.Popen(cmd)
     p.wait()
+
 
 def nsec3(zone, salt="-"):
     cmd = ["rndc", "signing", "-nsec3param", "1", "0", "10", salt, zone]
@@ -117,9 +125,14 @@ class Zone(object):
             new_ksk.publish = now
             new_ksk.activate = (now + INTERVAL)
             bind_reload()
-        active_ksk = [ksk for ksk in self.KSK if ksk.is_publish and ksk.delete is None]
-        if len(active_ksk)>=2:
-            sys.stderr.write("New KSK needs DS seen and/or old KSK needs inactivate/remove for zone %s\n" % self.name)
+        active_ksk = [key for key in self.KSK if key.is_publish and key.delete is None]
+        if len(active_ksk) >= 2:
+            sys.stderr.write(
+                (
+                    "New KSK needs DS seen and/or old KSK needs "
+                    "inactivate/remove for zone %s\n"
+                ) % self.name
+            )
 
     def ds_seen(self, keyid):
         old_ksks = []
@@ -161,6 +174,7 @@ class Zone(object):
             cmd = ["/usr/sbin/dnssec-dsfromkey", ksk._path]
             p = subprocess.Popen(cmd)
             p.wait()
+
     def key(self):
         for ksk in self.KSK:
             print ksk
@@ -176,22 +190,23 @@ class Zone(object):
         for file in os.listdir(path):
             file_path = os.path.join(path, file)
             if os.path.isfile(file_path) and file_path.endswith(".private"):
-               try:
-                   key = Key(file_path)
-                   if key.type == "ZSK":
-                       self.ZSK.append(key)
-                   elif key.type == "KSK":
-                       self.KSK.append(key)
-                   else:
-                       raise RuntimeError("impossible")
-               except ValueError as error:
-                   sys.stderr.write("%s\n" % error)
+                try:
+                    key = Key(file_path)
+                    if key.type == "ZSK":
+                        self.ZSK.append(key)
+                    elif key.type == "KSK":
+                        self.KSK.append(key)
+                    else:
+                        raise RuntimeError("impossible")
+                except ValueError as error:
+                    sys.stderr.write("%s\n" % error)
         self.ZSK.sort()
         self.KSK.sort()
         if not self.ZSK:
             self.ZSK.append(Key.create("ZSK", name))
         if not self.KSK:
             self.KSK.append(Key.create("KSK", name))
+
 
 @total_ordering
 class Key(object):
@@ -213,10 +228,11 @@ class Key(object):
     def __repr__(self):
         r = os.path.basename(self._path)
         return r
-        
+
     def _date_from_key(self, date):
         if date is not None:
             return datetime.datetime.strptime(date, "%Y%m%d%H%M%S")
+
     def _date_to_key(self, date):
         return datetime.datetime.strftime(date, "%Y%m%d%H%M%S")
 
@@ -224,7 +240,10 @@ class Key(object):
     def create(cls, typ, name):
         path = os.path.join(BASE, name)
         if typ == "KSK":
-            cmd = ["/usr/sbin/dnssec-keygen", "-a", "RSASHA256", "-b", "2048", "-f", "KSK", "-K", path,  name]
+            cmd = [
+                "/usr/sbin/dnssec-keygen", "-a", "RSASHA256",
+                "-b", "2048", "-f", "KSK", "-K", path,  name
+            ]
         elif typ == "ZSK":
             cmd = ["/usr/sbin/dnssec-keygen", "-a", "RSASHA256", "-b", "1024", "-K", path,  name]
         else:
@@ -236,9 +255,12 @@ class Key(object):
         keyname = p.communicate()[0].strip()
         bind_chown(path)
         return cls(os.path.join(path, "%s.private" % keyname))
-          
+
     def gen_successor(self):
-        cmd = ["/usr/sbin/dnssec-keygen", "-i", str(int(INTERVAL.total_seconds())),  "-S", self._path, "-K", os.path.dirname(self._path)]
+        cmd = [
+            "/usr/sbin/dnssec-keygen", "-i", str(int(INTERVAL.total_seconds())),
+            "-S", self._path, "-K", os.path.dirname(self._path)
+        ]
         p = subprocess.Popen(cmd, stderr=subprocess.PIPE)
         err = p.communicate()[1]
         if p.returncode != 0:
@@ -262,7 +284,7 @@ class Key(object):
         if date != self._publish:
             settime(self._path, 'P', date)
             self._publish = date
-            with open(self._path, 'r') as f:   
+            with open(self._path, 'r') as f:
                 self._data = f.read()
 
     @property
@@ -275,7 +297,7 @@ class Key(object):
         if date != self._activate:
             settime(self._path, 'A', date)
             self._activate = date
-            with open(self._path, 'r') as f:   
+            with open(self._path, 'r') as f:
                 self._data = f.read()
 
     @property
@@ -288,7 +310,7 @@ class Key(object):
         if date != self._inactive:
             settime(self._path, 'I', date)
             self._inactive = date
-            with open(self._path, 'r') as f:   
+            with open(self._path, 'r') as f:
                 self._data = f.read()
 
     @property
@@ -301,18 +323,21 @@ class Key(object):
         if date != self._delete:
             settime(self._path, 'D', date)
             self._delete = date
-            with open(self._path, 'r') as f:   
+            with open(self._path, 'r') as f:
                 self._data = f.read()
 
     @property
     def is_publish(self):
         return self.publish is not None and self.publish <= datetime.datetime.utcnow()
+
     @property
     def is_activate(self):
         return self.activate is not None and self.activate <= datetime.datetime.utcnow()
+
     @property
     def is_inactive(self):
         return self.inactive is not None and self.inactive <= datetime.datetime.utcnow()
+
     @property
     def is_delete(self):
         return self.delete is not None and self.delete <= datetime.datetime.utcnow()
@@ -344,14 +369,23 @@ class Key(object):
             line = line.split(";", 1)[0].strip()
             line = line.split()
             if len(line) < 7:
-                raise ValueError("La clef publique %s devrait avoir au moins 7 champs: %r" % (ppath, line))
+                raise ValueError(
+                    "La clef publique %s devrait avoir au moins 7 champs: %r" % (ppath, line)
+                )
             if not line[0].endswith('.'):
-                raise ValueError("La clef publique %s devrait commencer par le fqdn (finissant par un .) de la zone" % ppath)
+                raise ValueError(
+                    (
+                        "La clef publique %s devrait commencer par le fqdn "
+                        "(finissant par un .) de la zone"
+                    ) % ppath
+                )
             self.zone_name = line[0][:-1]
             try:
                 self.flag = int(line[3])
             except ValueError:
-                raise ValueError("Le flag %s de la clef publique %s devrait être un entier" % (line[3], ppath))
+                raise ValueError(
+                    "Le flag %s de la clef publique %s devrait être un entier" % (line[3], ppath)
+                )
         if self.flag == 256:
             self.type = "ZSK"
         elif self.flag == 257:
@@ -385,14 +419,14 @@ class Key(object):
             raise ValueError("La clef %s doit au moins avoir le champs Created de définit" % path)
 
     def __lt__(self, y):
-       if not isinstance(y, Key):
-           raise ValueError("can only compare two Keys")
-       if self.activate is not None and y.activate is not None:
-           return self.activate < y.activate
-       elif self.publish is not None and y.publish is not None:
-           return self.publish < y.publish
-       else:
-           return self.created < y.created
+        if not isinstance(y, Key):
+            raise ValueError("can only compare two Keys")
+        if self.activate is not None and y.activate is not None:
+            return self.activate < y.activate
+        elif self.publish is not None and y.publish is not None:
+            return self.publish < y.publish
+        else:
+            return self.created < y.created
 
     def __eq__(self, y):
         return isinstance(y, Key) and y._path == self._path
@@ -401,12 +435,40 @@ if __name__ == '__main__':
     try:
         parser = argparse.ArgumentParser()
         parser.add_argument('zone', nargs='*', help='zone name')
-        parser.add_argument('--make', '-m', action='store_true', help='Create keys for each supplied zone')
-        parser.add_argument('--cron', '-c', action='store_true', help='Perform maintenance for each supplied zone or for all zones if no zone supplied')
-        parser.add_argument('-ds', action='store_true', help='Show DS for each supplied zone or for all zones if no zone supplied')
-        parser.add_argument('-key', action='store_true', help='Show DNSKEY for each zone supplied zone or for all zones if no zone supplied')
-        parser.add_argument('--ds-seen', metavar='KEYID', type=int, help='To call with the ID of a new KSK published in the parent zone. Programs old KSK removal')
-        parser.add_argument('--nsec3', action='store_true', help='Enable NSEC3 for the zones, using a random salt')
+        parser.add_argument(
+            '--make', '-m',
+            action='store_true',
+            help='Create keys for each supplied zone'
+        )
+        parser.add_argument(
+            '--cron', '-c',
+            action='store_true',
+            help='Perform maintenance for each supplied zone or for all zones if no zone supplied'
+        )
+        parser.add_argument(
+            '-ds',
+            action='store_true',
+            help='Show DS for each supplied zone or for all zones if no zone supplied'
+        )
+        parser.add_argument(
+            '-key',
+            action='store_true',
+            help='Show DNSKEY for each zone supplied zone or for all zones if no zone supplied'
+        )
+        parser.add_argument(
+            '--ds-seen',
+            metavar='KEYID',
+            type=int,
+            help=(
+                'To call with the ID of a new KSK published in the parent zone. '
+                'Programs old KSK removal'
+            )
+        )
+        parser.add_argument(
+            '--nsec3',
+            action='store_true',
+            help='Enable NSEC3 for the zones, using a random salt'
+        )
         args = parser.parse_args()
         zones = args.zone
         if args.make:
