@@ -45,12 +45,12 @@ def get_zones(zone_names=None):
 
 def settime(path, flag, date):
     cmd = ["/usr/sbin/dnssec-settime", "-i", str(int(INTERVAL.total_seconds())), "-%s" % flag, date, path]
-    p = subprocess.Popen(cmd, stderr=subprocess.PIPE)
+    p = subprocess.Popen(cmd, stderr=subprocess.PIPE, stdout=subprocess.PIPE)
     err = p.communicate()[1]
     if p.returncode != 0:
         raise ValueError("err %s: %s" % (p.returncode, err))
     if err:
-        print err
+        sys.stderr.write("%s\n" % err)
 
 def bind_chown(path):
     os.chown(path, 104, -1)
@@ -125,10 +125,11 @@ class Zone(object):
         now = datetime.datetime.utcnow()
         for ksk in old_ksks:
             print " * program key %s removal" % ksk.keyid
+            inactive = max(seen_ksk.activate, now + INTERVAL)
             # delete INTERVAL after being inactive
-            ksk.delete = max(seen_ksk.activate, now + INTERVAL) + INTERVAL
+            ksk.delete = inactive + INTERVAL
             # set inactive in at least INTERVAL
-            ksk.inactive = max(seen_ksk.activate, now + INTERVAL)
+            ksk.inactive = inactive
         bind_reload()
 
     def remove_deleted(self):
