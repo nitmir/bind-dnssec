@@ -1,1 +1,0 @@
-rndc signing -nsec3param 1 0 10 95e90fe8f34d33c8ffd35a441d0a818a ddns.genua.fr

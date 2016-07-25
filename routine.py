@@ -66,6 +66,15 @@ def bind_reload():
     p = subprocess.Popen(cmd)
     p.wait()
 
+def nsec3(zone, salt="-"):
+    cmd = ["rndc", "signing", "-nsec3param", "1", "0", "10", salt, zone]
+    sys.stdout.write("Enabling nsec3 for zone %s: " % zone)
+    p = subprocess.Popen(cmd, stdout=subprocess.PIPE)
+    out = p.communicate()[0]
+    sys.stdout.write(out)
+    p.wait()
+
+
 class Zone(object):
     ZSK = None
     KSK = None
@@ -397,12 +406,16 @@ if __name__ == '__main__':
         parser.add_argument('-ds', action='store_true', help='Show DS for each supplied zone or for all zones if no zone supplied')
         parser.add_argument('-key', action='store_true', help='Show DNSKEY for each zone supplied zone or for all zones if no zone supplied')
         parser.add_argument('--ds-seen', metavar='KEYID', type=int, help='To call with the ID of a new KSK published in the parent zone. Programs old KSK removal')
+        parser.add_argument('--nsec3', action='store_true', help='Enable NSEC3 for the zones, using a random salt')
         args = parser.parse_args()
         zones = args.zone
         if args.make:
             for zone in zones:
                 Zone.create(zone)
         zones = get_zones(zones if zones else None)
+        if args.nsec3:
+            for zone in zones:
+                nsec3(zone.name, os.urandom(24).encode("hex"))
         if args.ds_seen:
             if len(zones) != 1:
                 sys.stderr.write("Please specify exactly ONE zone name\n")
@@ -420,7 +433,7 @@ if __name__ == '__main__':
         if args.key:
             for zone in zones:
                 zone.key()
-        if not any([args.make, args.cron, args.ds, args.key, args.ds_seen]):
+        if not any([args.make, args.cron, args.ds, args.key, args.ds_seen, args.nsec3]):
             parser.print_help()
     except ValueError as error:
         sys.stderr.write("%s\n" % error)
