@@ -13,12 +13,13 @@ BASE = "/etc/bind/keys"
 # Interval entre 2 opérations sur les clefs dns.
 # Par exemple si vous avec la clef1 d'utilisé,
 # clef2 est publié INTERVAL avant la désactivation de clef1.
-# clef1 est désactivé INTERVAL après que clef2 est activé,
+# clef1 est désactivé quand clef2 est activé,
 # clef2 est supprimé INTRERVAL après sa désactivation.
 # INTERVAL DOIT être supérieur aux plus long TTL que les enregistrement DS peuvent avoir.
+# INTERVAL DOIT egalement être supérieur a l'intervale de signature de bind (défaut de 22.5 jours)
 # Cela dépent essentiellement de la configuration de la zone parente et vous n'avez pas forcement
 # de controle dessus.
-INTERVAL = datetime.timedelta(days=14)
+INTERVAL = datetime.timedelta(days=23)
 # Durée au bout de laquelle une ZSK est remplacé par une nouvelle ZSK.
 # La génération des ZSK et leur activation/désactivation/suppression est géré
 # automatiquement tant que routine.py -c est appelé au moins une fois par
@@ -92,7 +93,7 @@ class Zone(object):
     def do_zsk(self):
         for zsk in self.ZSK:
             if zsk.is_activate:
-                inactive = zsk.activate + INTERVAL
+                inactive = zsk.activate + ZSK_VALIDITY
                 zsk.delete = inactive + INTERVAL
                 zsk.inactive = inactive
         if zsk.is_activate:
