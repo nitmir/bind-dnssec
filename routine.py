@@ -110,9 +110,8 @@ class Zone(object):
     def do_zsk(self):
         for zsk in self.ZSK:
             if zsk.is_activate:
-                inactive = zsk.activate + ZSK_VALIDITY
-                zsk.delete = inactive + INTERVAL
-                zsk.inactive = inactive
+                zsk.inactive = zsk.activate + ZSK_VALIDITY
+                zsk.delete = zsk.inactive + INTERVAL
         if zsk.is_activate:
             zsk.gen_successor()
             bind_reload()
@@ -151,11 +150,10 @@ class Zone(object):
             seen_ksk.activate = (now + INTERVAL)
         for ksk in old_ksks:
             print " * program key %s removal" % ksk.keyid
-            inactive = seen_ksk.activate
-            # delete INTERVAL after being inactive
-            ksk.delete = inactive + INTERVAL
             # set inactive in at least INTERVAL
-            ksk.inactive = inactive
+            ksk.inactive = seen_ksk.activate
+            # delete INTERVAL after being inactive
+            ksk.delete = ksk.inactive + INTERVAL
         bind_reload()
 
     def remove_deleted(self):
