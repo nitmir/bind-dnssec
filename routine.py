@@ -123,7 +123,8 @@ class Zone(object):
             now = datetime.datetime.utcnow()
             new_ksk = Key.create("KSK", self.name)
             new_ksk.publish = now
-            new_ksk.activate = (now + INTERVAL)
+            # do not activate the new key until ds-seen
+            new_ksk.activate = None
             bind_reload()
         active_ksk = [key for key in self.KSK if key.is_publish and key.delete is None]
         if len(active_ksk) >= 2:
@@ -146,9 +147,11 @@ class Zone(object):
             return
         print "Key %s found" % keyid
         now = datetime.datetime.utcnow()
+        if seen_ksk.activate is None:
+            seen_ksk.activate = (now + INTERVAL)
         for ksk in old_ksks:
             print " * program key %s removal" % ksk.keyid
-            inactive = max(seen_ksk.activate, now + INTERVAL)
+            inactive = seen_ksk.activate
             # delete INTERVAL after being inactive
             ksk.delete = inactive + INTERVAL
             # set inactive in at least INTERVAL
@@ -234,20 +237,25 @@ class Key(object):
             return datetime.datetime.strptime(date, "%Y%m%d%H%M%S")
 
     def _date_to_key(self, date):
-        return datetime.datetime.strftime(date, "%Y%m%d%H%M%S")
+        if date is None:
+            return 'none'
+        else:
+            return datetime.datetime.strftime(date, "%Y%m%d%H%M%S")
 
     @classmethod
-    def create(cls, typ, name):
+    def create(cls, typ, name, options=None):
+        if options is None:
+            options = []
         path = os.path.join(BASE, name)
+        cmd = ["/usr/sbin/dnssec-keygen", "-a", "RSASHA256"]
         if typ == "KSK":
-            cmd = [
-                "/usr/sbin/dnssec-keygen", "-a", "RSASHA256",
-                "-b", "2048", "-f", "KSK", "-K", path,  name
-            ]
+            cmd.extend(["-b", "2048", "-f", "KSK"])
         elif typ == "ZSK":
-            cmd = ["/usr/sbin/dnssec-keygen", "-a", "RSASHA256", "-b", "1024", "-K", path,  name]
+            cmd.extend(["-b", "1024"])
         else:
             raise ValueError("typ must be KSK or ZSK")
+        cmd.extend(options)
+        cmd.extend(["-K", path,  name])
         p = subprocess.Popen(cmd, stdout=subprocess.PIPE)
         p.wait()
         if p.returncode != 0:
