@@ -242,6 +242,31 @@ class Key(object):
         else:
             return datetime.datetime.strftime(date, "%Y%m%d%H%M%S")
 
+    def _date_check(self, value, needed_date, value_name, needed_date_name):
+        if value is not None:
+            if needed_date is None or value < needed_date:
+                raise RuntimeError(
+                    "Cannot set %s date before %s date on key %s on zone %s" % (
+                        value_name,
+                        needed_date_name,
+                        self.keyid,
+                        self.zone_name
+                     )
+                )
+
+    def _date_check2(self, value, needed_date, value_name, needed_date_name):
+        msg = "Cannot set %s date after %s date on key %s on zone %s" % (
+                  value_name,
+                  needed_date_name,
+                  self.keyid,
+                  self.zone_name
+              )
+        if value is None and needed_date is not None:
+            raise RuntimeError(msg)
+        elif value is not None and needed_date is not None:
+            if value > needed_date:
+                raise RuntimeError(msg)
+
     @classmethod
     def create(cls, typ, name, options=None):
         if options is None:
@@ -288,6 +313,8 @@ class Key(object):
             return self._date_from_key(self._publish)
     @publish.setter
     def publish(self, value):
+        self._date_check(value, self.created, "publish", "created")
+        self._date_check2(value, self.activate, "publish", "activate")
         date = self._date_to_key(value)
         if date != self._publish:
             settime(self._path, 'P', date)
@@ -301,6 +328,8 @@ class Key(object):
             return self._date_from_key(self._activate)
     @activate.setter
     def activate(self, value):
+        self._date_check(value, self.publish, "active", "publish")
+        self._date_check2(value, self.inactive, "activate", "inactive")
         date = self._date_to_key(value)
         if date != self._activate:
             settime(self._path, 'A', date)
@@ -314,6 +343,8 @@ class Key(object):
             return self._date_from_key(self._inactive)
     @inactive.setter
     def inactive(self, value):
+        self._date_check(value, self.activate, "inactive", "activate")
+        self._date_check2(value, self.delete, "inactive", "delete")
         date = self._date_to_key(value)
         if date != self._inactive:
             settime(self._path, 'I', date)
@@ -327,6 +358,7 @@ class Key(object):
             return self._date_from_key(self._delete)
     @delete.setter
     def delete(self, value):
+        self._date_check(value, self.inactive, "delete", "inactive")
         date = self._date_to_key(value)
         if date != self._delete:
             settime(self._path, 'D', date)
