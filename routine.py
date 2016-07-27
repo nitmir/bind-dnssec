@@ -166,8 +166,9 @@ class Zone(object):
         except OSError as error:
             if error.errno != 17:  # File exists
                 raise
+        now = datetime.datetime.utcnow()
         for key in self.ZSK + self.KSK:
-            if key.is_delete:
+            if key.delete and (key.delete + INTERVAL) <= now:
                 for path in [key._path, key._path_private]:
                     basename = os.path.basename(path)
                     new_path = os.path.join(deleted_path, basename)
