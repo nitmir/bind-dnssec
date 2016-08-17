@@ -112,12 +112,15 @@ class Zone(object):
             if zsk.is_activate:
                 zsk.inactive = zsk.activate + ZSK_VALIDITY
                 zsk.delete = zsk.inactive + INTERVAL
+                last_activate_zsk = zsk
         now = datetime.datetime.utcnow()
         if zsk.is_activate:
             zsk.inactive = max(zsk.inactive, now + INTERVAL)
             zsk.delete = zsk.inactive + INTERVAL
             zsk.gen_successor()
             bind_reload()
+        else:
+            zsk.activate = last_activate_zsk.inactive
 
     def do_ksk(self):
         ksk = self.KSK[-1]
