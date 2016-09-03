@@ -191,9 +191,13 @@ class Zone(object):
             p = subprocess.Popen(cmd)
             p.wait()
 
-    def key(self):
-        for ksk in self.KSK:
-            print ksk
+    def key(self, show_ksk=False, show_zsk=False):
+        if show_ksk:
+            for ksk in self.KSK:
+                print ksk
+        if show_zsk:
+            for zsk in self.ZSK:
+                print zsk
 
     def __init__(self, name):
         path = os.path.join(BASE, name)
@@ -501,12 +505,22 @@ if __name__ == '__main__':
         parser.add_argument(
             '-ds',
             action='store_true',
-            help='Show DS for each supplied zone or for all zones if no zone supplied'
+            help='Show KSK DS for each supplied zone or for all zones if no zone supplied'
         )
         parser.add_argument(
             '-key',
             action='store_true',
             help='Show DNSKEY for each zone supplied zone or for all zones if no zone supplied'
+        )
+        parser.add_argument(
+            '-KSK',
+            action='store_true',
+            help='Show KSK DNSKEY for each zone supplied zone or for all zones if no zone supplied'
+        )
+        parser.add_argument(
+            '-ZSK',
+            action='store_true',
+            help='Show ZSK DNSKEY for each zone supplied zone or for all zones if no zone supplied'
         )
         parser.add_argument(
             '--ds-seen',
@@ -547,8 +561,15 @@ if __name__ == '__main__':
                 zone.ds()
         if args.key:
             for zone in zones:
-                zone.key()
-        if not any([args.make, args.cron, args.ds, args.key, args.ds_seen, args.nsec3]):
+                zone.key(show_ksk=True, show_zsk=True)
+        else:
+            if args.KSK:
+                for zone in zones:
+                    zone.key(show_ksk=True)
+            if args.ZSK:
+                for zone in zones:
+                    zone.key(show_zsk=True)
+        if not any([args.make, args.cron, args.ds, args.key, args.ds_seen, args.nsec3, args.KSK, args.ZSK]):
             parser.print_help()
     except ValueError as error:
         sys.stderr.write("%s\n" % error)
