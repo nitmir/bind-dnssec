@@ -6,6 +6,8 @@ import sys
 import datetime
 import subprocess
 import argparse
+import pwd
+
 from functools import total_ordering
 
 
@@ -60,13 +62,19 @@ def settime(path, flag, date):
 
 
 def bind_chown(path):
-    os.chown(path, 104, -1)
-    for root, dirs, files in os.walk(path):
-        for momo in dirs:
-            os.chown(os.path.join(root, momo), 104, -1)
-        for momo in files:
-            os.chown(os.path.join(root, momo), 104, -1)
-
+    """
+        Gives the files to the bind user and sets the modes in a relevant way.
+    """
+    try:
+        bind_uid = pwd.getpwnam('bind').pw_uid
+        os.chown(path, bind_uid, -1)
+        for root, dirs, files in os.walk(path):
+            for momo in dirs:
+                os.chown(os.path.join(root, momo), bind_uid, -1)
+            for momo in files:
+                os.chown(os.path.join(root, momo), bind_uid, -1)
+    except KeyError:
+        sys.stderr.write("User bind not found, failing to give keys ownership to bind\n")
 
 def bind_reload():
     cmd = ["/usr/sbin/rndc", "reload"]
