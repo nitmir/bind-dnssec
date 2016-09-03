@@ -76,6 +76,7 @@ def bind_chown(path):
     except KeyError:
         sys.stderr.write("User bind not found, failing to give keys ownership to bind\n")
 
+
 def bind_reload():
     cmd = ["/usr/sbin/rndc", "reload"]
     p = subprocess.Popen(cmd)
@@ -268,16 +269,16 @@ class Key(object):
                         needed_date_name,
                         self.keyid,
                         self.zone_name
-                     )
+                    )
                 )
 
     def _date_check2(self, value, needed_date, value_name, needed_date_name):
         msg = "Cannot set %s date after %s date on key %s on zone %s" % (
-                  value_name,
-                  needed_date_name,
-                  self.keyid,
-                  self.zone_name
-              )
+            value_name,
+            needed_date_name,
+            self.keyid,
+            self.zone_name
+        )
         if value is None and needed_date is not None:
             raise RuntimeError(msg)
         elif value is not None and needed_date is not None:
@@ -569,7 +570,10 @@ if __name__ == '__main__':
             if args.ZSK:
                 for zone in zones:
                     zone.key(show_zsk=True)
-        if not any([args.make, args.cron, args.ds, args.key, args.ds_seen, args.nsec3, args.KSK, args.ZSK]):
+        if not any([
+            args.make, args.cron, args.ds, args.key, args.ds_seen, args.nsec3,
+            args.KSK, args.ZSK
+        ]):
             parser.print_help()
     except ValueError as error:
         sys.stderr.write("%s\n" % error)
