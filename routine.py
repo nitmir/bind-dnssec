@@ -17,7 +17,7 @@ BASE = "/etc/bind/keys"
 # Interval between 2 operations on the dns keys.
 # For example if you have KEY1 enabled, KEY2 is published INTERVAL before disabling KEY1. KEY1 is
 # disabled when KEY2 is activated, KEY2 is deleted INTERVAL after being disabled.
-# INTERVAL MUST be greater than the longest TTL that the DS records can have 
+# INTERVAL MUST be greater than the longest TTL that the DS records can have
 # INTERVAL MUST also be higher in the bind signature interval (default 22.5 days)
 # This mainly depents of the parent zone configuration and you do not necessarily have
 # control over it.
@@ -614,8 +614,8 @@ if __name__ == '__main__':
                 RNDC = config["rndc"]
 
     for path in [DNSSEC_SETTIME, DNSSEC_DSFROMKEY, DNSSEC_KEYGEN, RNDC]:
-        if not os.path.isfile(path):
-            sys.stderr.write("%s not found. Is bind9utils installed ?\n" % path)
+        if not os.path.isfile(path) or not os.access(path, os.X_OK):
+            sys.stderr.write("%s not found or not executable. Is bind9utils installed ?\n" % path)
             sys.exit(1)
 
     try:
