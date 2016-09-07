@@ -42,7 +42,6 @@ DNSSEC_KEYGEN = "/usr/sbin/dnssec-keygen"
 RNDC = "/usr/sbin/rndc"
 
 
-
 def get_zones(zone_names=None):
     l = []
     if zone_names is None:
@@ -167,12 +166,12 @@ class Zone(object):
         else:
             sys.stderr.write("Key not found\n")
             return
-        print "Key %s found" % keyid
+        print("Key %s found" % keyid)
         now = datetime.datetime.utcnow()
         if seen_ksk.activate is None:
             seen_ksk.activate = (now + INTERVAL)
         for ksk in old_ksks:
-            print " * program key %s removal" % ksk.keyid
+            print(" * program key %s removal" % ksk.keyid)
             # set inactive in at least INTERVAL
             ksk.inactive = seen_ksk.activate
             # delete INTERVAL after being inactive
@@ -377,7 +376,7 @@ class Key(object):
         if p.returncode != 0:
             raise ValueError("err %s: %s" % (p.returncode, err))
         if err:
-            print err
+            print(err)
         bind_chown(os.path.dirname(self._path))
 
     @property
@@ -389,6 +388,7 @@ class Key(object):
     def publish(self):
         if self._publish is not None:
             return self._date_from_key(self._publish)
+
     @publish.setter
     def publish(self, value):
         self._date_check(value, self.created, "publish", "created")
@@ -404,6 +404,7 @@ class Key(object):
     def activate(self):
         if self._activate is not None:
             return self._date_from_key(self._activate)
+
     @activate.setter
     def activate(self, value):
         self._date_check(value, self.publish, "active", "publish")
@@ -419,6 +420,7 @@ class Key(object):
     def inactive(self):
         if self._inactive is not None:
             return self._date_from_key(self._inactive)
+
     @inactive.setter
     def inactive(self, value):
         self._date_check(value, self.activate, "inactive", "activate")
@@ -434,6 +436,7 @@ class Key(object):
     def delete(self):
         if self._delete:
             return self._date_from_key(self._delete)
+
     @delete.setter
     def delete(self, value):
         self._date_check(value, self.inactive, "delete", "inactive")
