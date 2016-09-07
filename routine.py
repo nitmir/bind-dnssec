@@ -267,7 +267,7 @@ class Zone(object):
 
     def key_table(self, show_creation=False):
         """Show meta data for the zone keys in a table"""
-        znl = len(self.name)
+        znl = max(len(self.name), 9)
         self._key_table_header(znl, show_creation)
         self._key_table_body(znl, show_creation)
         self._key_table_footer(znl, show_creation)
@@ -699,6 +699,7 @@ if __name__ == '__main__':
                 zone.key(show_ksk=args.key in ["all", "ksk"], show_zsk=args.key in ["all", "zsk"])
         if args.key_table:
             znl = max(len(zone.name) for zone in zones)
+            znl = max(znl, 9)
             Zone._key_table_header(znl, args.key_table == "all_fields")
             for zone in zones:
                 zone._key_table_body(znl, args.key_table == "all_fields")
