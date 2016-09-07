@@ -203,10 +203,62 @@ class Zone(object):
     def key(self, show_ksk=False, show_zsk=False):
         if show_ksk:
             for ksk in self.KSK:
-                print ksk
+                print(ksk)
         if show_zsk:
             for zsk in self.ZSK:
-                print zsk
+                print(zsk)
+
+    @staticmethod
+    def _key_table_format(znl, show_creation=False):
+        format_string = "|{!s:^%d}|{}|" % znl
+        if show_creation:
+            format_string += "{created!s:^19}|"
+        format_string += "{!s:^19}|{!s:^19}|{!s:^19}|{!s:^19}|"
+        separator = ("+" + "-" * znl + "+-+" + ("-" * 19 + "+") * (5 if show_creation else 4))
+        return (format_string, separator)
+
+    @classmethod
+    def _key_table_header(cls, znl, show_creation=False):
+        (format_string, separator) = cls._key_table_format(znl, show_creation)
+        print(separator)
+        print(format_string.format(
+            "Zone name", "T", "Publish", "Activate", "Inactive", "Delete", created="Created"
+        ))
+        print(separator)
+
+    def _key_table_body(self, znl, show_creation=False):
+        (format_string, separator) = self._key_table_format(znl, show_creation)
+        for ksk in self.KSK:
+            print(format_string.format(
+                ksk.zone_name,
+                "K",
+                ksk.publish or "N/A",
+                ksk.activate or "N/A",
+                ksk.inactive or "N/A",
+                ksk.delete or "N/A",
+                created=ksk.created or "N/A",
+            ))
+        for zsk in self.ZSK:
+            print(format_string.format(
+                zsk.zone_name,
+                "Z",
+                zsk.publish or "N/A",
+                zsk.activate or "N/A",
+                zsk.inactive or "N/A",
+                zsk.delete or "N/A",
+                created=zsk.created or "N/A",
+            ))
+
+    @classmethod
+    def _key_table_footer(cls, znl, show_creation=False):
+        (format_string, separator) = cls._key_table_format(znl, show_creation)
+        print(separator)
+
+    def key_table(self, show_creation=False):
+        znl = len(self.name)
+        self._key_table_header(znl, show_creation)
+        self._key_table_body(znl, show_creation)
+        self._key_table_footer(znl, show_creation)
 
     def __init__(self, name):
         path = os.path.join(BASE, name)
@@ -559,24 +611,19 @@ if __name__ == '__main__':
             help='Perform maintenance for each supplied zone or for all zones if no zone supplied'
         )
         parser.add_argument(
-            '-ds',
+            '--ds',
             action='store_true',
             help='Show KSK DS for each supplied zone or for all zones if no zone supplied'
         )
         parser.add_argument(
-            '-key',
-            action='store_true',
+            '--key',
+            nargs='?', const="all", type=str, choices=["all", "ksk", "zsk"],
             help='Show DNSKEY for each zone supplied zone or for all zones if no zone supplied'
         )
         parser.add_argument(
-            '-KSK',
-            action='store_true',
-            help='Show KSK DNSKEY for each zone supplied zone or for all zones if no zone supplied'
-        )
-        parser.add_argument(
-            '-ZSK',
-            action='store_true',
-            help='Show ZSK DNSKEY for each zone supplied zone or for all zones if no zone supplied'
+            '--key-table',
+            nargs='?', const="default", type=str, choices=["default", "all_fields"],
+            help='Show a table with all non deleted DNSKEY meaningful dates'
         )
         parser.add_argument(
             '--ds-seen',
@@ -633,17 +680,16 @@ if __name__ == '__main__':
                 zone.ds()
         if args.key:
             for zone in zones:
-                zone.key(show_ksk=True, show_zsk=True)
-        else:
-            if args.KSK:
-                for zone in zones:
-                    zone.key(show_ksk=True)
-            if args.ZSK:
-                for zone in zones:
-                    zone.key(show_zsk=True)
+                zone.key(show_ksk=args.key in ["all", "ksk"], show_zsk=args.key in ["all", "zsk"])
+        if args.key_table:
+            znl = max(len(zone.name) for zone in zones)
+            Zone._key_table_header(znl, args.key_table == "all_fields")
+            for zone in zones:
+                zone._key_table_body(znl, args.key_table == "all_fields")
+            Zone._key_table_footer(znl, args.key_table == "all_fields")
         if not any([
             args.make, args.cron, args.ds, args.key, args.ds_seen, args.nsec3,
-            args.KSK, args.ZSK, args.show_config
+            args.show_config, args.key_table
         ]):
             parser.print_help()
     except ValueError as error:
