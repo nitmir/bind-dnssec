@@ -297,8 +297,10 @@ class Zone(object):
         self.KSK.sort()
         if not self.ZSK:
             self.ZSK.append(Key.create("ZSK", name))
+            self.do_zsk()
         if not self.KSK:
             self.KSK.append(Key.create("KSK", name))
+            self.do_ksk()
 
 
 @total_ordering
