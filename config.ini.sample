@@ -1,0 +1,36 @@
+[dnssec]
+base_directory=/etc/bind/keys
+
+# Interval entre 2 opérations sur les clefs dns en jour. Vous pouvez utiliser un flotant.
+# Par exemple si vous avez la clef1 d'utilisé,
+# clef2 est publié INTERVAL avant la désactivation de clef1.
+# clef1 est désactivé quand clef2 est activé,
+# clef2 est supprimé INTRERVAL après sa désactivation.
+# INTERVAL DOIT être supérieur aux plus long TTL que les enregistrement DS peuvent avoir.
+# INTERVAL DOIT egalement être supérieur à l'intervale de signature de bind (défaut de 22.5 jours)
+# Cela dépent essentiellement de la configuration de la zone parente et vous n'avez pas forcement
+# de controle dessus.
+interval=23
+
+
+# Durée au bout de laquelle une ZSK est remplacé par une nouvelle ZSK.
+# La génération des ZSK et leur activation/désactivation/suppression est géré
+# automatiquement tant que routine.py -c est appelé au moins une fois par
+# jour.
+zsk_validity=30
+
+
+# Temps au bout duquelle une nouvelle KSK est généré et publié pour la zone
+# (et activé après INTERVAL). L'ancienne clef n'est retiré que INTERVAL après que la nouvelle
+# clef a été routine.py --ds-seen. Cela demande en général une opération
+# manuelle avec le registrar (publier le DS de la nouvelle clef dans la zone parente)
+# et routine.py -c affiche un message tant que cela n'a pas été fait.
+ksk_validity=366
+
+
+[path]
+
+dnssec_settime=/usr/sbin/dnssec-settime
+dnssec_dsfromkey=/usr/sbin/dnssec-dsfromkey
+dnssec_keygen=/usr/sbin/dnssec-keygen
+rndc=/usr/sbin/rndc

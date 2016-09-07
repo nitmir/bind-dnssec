@@ -7,6 +7,7 @@ import datetime
 import subprocess
 import argparse
 import pwd
+import configparser
 
 from functools import total_ordering
 
@@ -35,6 +36,13 @@ ZSK_VALIDITY = datetime.timedelta(days=30)  # ~1 mois
 KSK_VALIDITY = datetime.timedelta(days=366)  # ~1 an
 
 
+DNSSEC_SETTIME = "/usr/sbin/dnssec-settime"
+DNSSEC_DSFROMKEY = "/usr/sbin/dnssec-dsfromkey"
+DNSSEC_KEYGEN = "/usr/sbin/dnssec-keygen"
+RNDC = "/usr/sbin/rndc"
+
+
+
 def get_zones(zone_names=None):
     l = []
     if zone_names is None:
@@ -49,7 +57,7 @@ def get_zones(zone_names=None):
 
 def settime(path, flag, date):
     cmd = [
-        "/usr/sbin/dnssec-settime",
+        DNSSEC_SETTIME,
         "-i", str(int(INTERVAL.total_seconds())),
         "-%s" % flag, date, path
     ]
@@ -78,13 +86,13 @@ def bind_chown(path):
 
 
 def bind_reload():
-    cmd = ["/usr/sbin/rndc", "reload"]
+    cmd = [RNDC, "reload"]
     p = subprocess.Popen(cmd)
     p.wait()
 
 
 def nsec3(zone, salt="-"):
-    cmd = ["rndc", "signing", "-nsec3param", "1", "0", "10", salt, zone]
+    cmd = [RNDC, "signing", "-nsec3param", "1", "0", "10", salt, zone]
     sys.stdout.write("Enabling nsec3 for zone %s: " % zone)
     p = subprocess.Popen(cmd, stdout=subprocess.PIPE)
     out = p.communicate()[0]
@@ -188,7 +196,7 @@ class Zone(object):
 
     def ds(self):
         for ksk in self.KSK:
-            cmd = ["/usr/sbin/dnssec-dsfromkey", ksk._path]
+            cmd = [DNSSEC_DSFROMKEY, ksk._path]
             p = subprocess.Popen(cmd)
             p.wait()
 
@@ -290,7 +298,7 @@ class Key(object):
         if options is None:
             options = []
         path = os.path.join(BASE, name)
-        cmd = ["/usr/sbin/dnssec-keygen", "-a", "RSASHA256"]
+        cmd = [DNSSEC_KEYGEN, "-a", "RSASHA256"]
         if typ == "KSK":
             cmd.extend(["-b", "2048", "-f", "KSK"])
         elif typ == "ZSK":
@@ -309,7 +317,7 @@ class Key(object):
 
     def gen_successor(self):
         cmd = [
-            "/usr/sbin/dnssec-keygen", "-i", str(int(INTERVAL.total_seconds())),
+            DNSSEC_KEYGEN, "-i", str(int(INTERVAL.total_seconds())),
             "-S", self._path, "-K", os.path.dirname(self._path)
         ]
         p = subprocess.Popen(cmd, stderr=subprocess.PIPE)
@@ -490,6 +498,53 @@ class Key(object):
         return isinstance(y, Key) and y._path == self._path
 
 if __name__ == '__main__':
+    config_parser = configparser.ConfigParser()
+    config_file = os.path.abspath(os.path.join(os.path.dirname(__file__), 'config.ini'))
+
+    if os.path.isfile(config_file):
+        config_parser.read(config_file)
+        if config_parser.has_section("dnssec"):
+            config = config_parser["dnssec"]
+            if "base_directory" in config:
+                BASE = config["base_directory"]
+            if "interval" in config:
+                try:
+                    INTERVAL = datetime.timedelta(days=config.getfloat("interval"))
+                except ValueError:
+                    sys.stderr.write(
+                        "Unable to convert the config parameter 'interval' to a float\n"
+                    )
+            if "zsk_validity" in config:
+                try:
+                    ZSK_VALIDITY = datetime.timedelta(days=config.getfloat("zsk_validity"))
+                except ValueError:
+                    sys.stderr.write(
+                        "Unable to convert the config parameter 'zsk_validity' to a float\n"
+                    )
+            if "ksk_validity" in config:
+                try:
+                    KSK_VALIDITY = datetime.timedelta(days=config.getfloat("ksk_validity"))
+                except ValueError:
+                    sys.stderr.write(
+                        "Unable to convert the config parameter 'ksk_validity' to a float\n"
+                    )
+
+        if config_parser.has_section("path"):
+            config = config_parser["path"]
+            if "dnssec_settime" in config:
+                DNSSEC_SETTIME = config["dnssec_settime"]
+            if "dnssec_dsfromkey" in config:
+                DNSSEC_DSFROMKEY = config["dnssec_dsfromkey"]
+            if "dnssec_keygen" in config:
+                DNSSEC_KEYGEN = config["dnssec_keygen"]
+            if "rndc" in config:
+                RNDC = config["rndc"]
+
+    for path in [DNSSEC_SETTIME, DNSSEC_DSFROMKEY, DNSSEC_KEYGEN, RNDC]:
+        if not os.path.isfile(path):
+            sys.stderr.write("%s not found. Is bind9utils installed ?\n" % path)
+            sys.exit(1)
+
     try:
         parser = argparse.ArgumentParser()
         parser.add_argument('zone', nargs='*', help='zone name')
@@ -537,8 +592,24 @@ if __name__ == '__main__':
             action='store_true',
             help='Enable NSEC3 for the zones, using a random salt'
         )
+        parser.add_argument(
+            '--show-config',
+            action='store_true',
+            help='Show the current configuration'
+        )
+
         args = parser.parse_args()
         zones = args.zone
+        if args.show_config:
+            print("Key base path: %s" % BASE)
+            print("Interval between two operation: %s" % INTERVAL)
+            print("ZSK validity duration: %s" % ZSK_VALIDITY)
+            print("KSK validity duration: %s" % KSK_VALIDITY)
+            print("")
+            print("Path to dnssec-settime: %s" % DNSSEC_SETTIME)
+            print("Path to dnssec-dsfromkey: %s" % DNSSEC_DSFROMKEY)
+            print("Path to dnssec-keygen: %s" % DNSSEC_KEYGEN)
+            print("Path to rdnc: %s" % RNDC)
         if args.make:
             for zone in zones:
                 Zone.create(zone)
@@ -572,7 +643,7 @@ if __name__ == '__main__':
                     zone.key(show_zsk=True)
         if not any([
             args.make, args.cron, args.ds, args.key, args.ds_seen, args.nsec3,
-            args.KSK, args.ZSK
+            args.KSK, args.ZSK, args.show_config
         ]):
             parser.print_help()
     except ValueError as error:
