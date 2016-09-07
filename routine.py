@@ -7,7 +7,7 @@ import datetime
 import subprocess
 import argparse
 import pwd
-import configparser
+import ConfigParser
 
 from functools import total_ordering
 
@@ -571,47 +571,49 @@ class Key(object):
         return isinstance(y, Key) and y._path == self._path
 
 if __name__ == '__main__':
-    config_parser = configparser.ConfigParser()
+    config_parser = ConfigParser.ConfigParser()
     config_file = os.path.abspath(os.path.join(os.path.dirname(__file__), 'config.ini'))
 
     if os.path.isfile(config_file):
         config_parser.read(config_file)
         if config_parser.has_section("dnssec"):
-            config = config_parser["dnssec"]
-            if "base_directory" in config:
-                BASE = config["base_directory"]
-            if "interval" in config:
+            if config_parser.has_option("dnssec", "base_directory"):
+                BASE = config_parser.get("dnssec", "base_directory")
+            if config_parser.has_option("dnssec", "interval"):
                 try:
-                    INTERVAL = datetime.timedelta(days=config.getfloat("interval"))
+                    INTERVAL = datetime.timedelta(days=config_parser.getfloat("dnssec", "interval"))
                 except ValueError:
                     sys.stderr.write(
                         "Unable to convert the config parameter 'interval' to a float\n"
                     )
-            if "zsk_validity" in config:
+            if config_parser.has_option("dnssec", "zsk_validity"):
                 try:
-                    ZSK_VALIDITY = datetime.timedelta(days=config.getfloat("zsk_validity"))
+                    ZSK_VALIDITY = datetime.timedelta(
+                        days=config_parser.getfloat("dnssec", "zsk_validity")
+                    )
                 except ValueError:
                     sys.stderr.write(
                         "Unable to convert the config parameter 'zsk_validity' to a float\n"
                     )
-            if "ksk_validity" in config:
+            if config_parser.has_option("dnssec", "ksk_validity"):
                 try:
-                    KSK_VALIDITY = datetime.timedelta(days=config.getfloat("ksk_validity"))
+                    KSK_VALIDITY = datetime.timedelta(
+                        days=config_parser.getfloat("dnssec", "ksk_validity")
+                    )
                 except ValueError:
                     sys.stderr.write(
                         "Unable to convert the config parameter 'ksk_validity' to a float\n"
                     )
 
         if config_parser.has_section("path"):
-            config = config_parser["path"]
-            if "dnssec_settime" in config:
-                DNSSEC_SETTIME = config["dnssec_settime"]
-            if "dnssec_dsfromkey" in config:
-                DNSSEC_DSFROMKEY = config["dnssec_dsfromkey"]
-            if "dnssec_keygen" in config:
-                DNSSEC_KEYGEN = config["dnssec_keygen"]
-            if "rndc" in config:
-                RNDC = config["rndc"]
+            if config_parser.has_option("path", "dnssec_settime"):
+                DNSSEC_SETTIME = config_parser.get("path", "dnssec_settime")
+            if config_parser.has_option("path", "dnssec_dsfromkey"):
+                DNSSEC_DSFROMKEY = config_parser.get("path", "dnssec_dsfromkey")
+            if config_parser.has_option("path", "dnssec_keygen"):
+                DNSSEC_KEYGEN = config_parser.get("path", "dnssec_keygen")
+            if config_parser.has_option("path", "rndc"):
+                RNDC = config_parser.get("path", "rndc")
 
     for path in [DNSSEC_SETTIME, DNSSEC_DSFROMKEY, DNSSEC_KEYGEN, RNDC]:
         if not os.path.isfile(path) or not os.access(path, os.X_OK):
