@@ -716,6 +716,6 @@ if __name__ == '__main__':
             args.show_config, args.key_table
         ]):
             parser.print_help()
-    except ValueError as error:
+    except (ValueError, IOError) as error:
         sys.stderr.write("%s\n" % error)
         sys.exit(1)
