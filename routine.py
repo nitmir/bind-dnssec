@@ -55,6 +55,7 @@ def get_zones(zone_names=None):
 
 
 def settime(path, flag, date):
+    """Set the time of the flag ``flag`` for the key at ``path`` to ``date``"""
     cmd = [
         DNSSEC_SETTIME,
         "-i", str(int(INTERVAL.total_seconds())),
@@ -85,12 +86,14 @@ def bind_chown(path):
 
 
 def bind_reload():
+    """Reload bind config"""
     cmd = [RNDC, "reload"]
     p = subprocess.Popen(cmd)
     p.wait()
 
 
 def nsec3(zone, salt="-"):
+    """Enable nsec3 for the zone ``zone``"""
     cmd = [RNDC, "signing", "-nsec3param", "1", "0", "10", salt, zone]
     sys.stdout.write("Enabling nsec3 for zone %s: " % zone)
     p = subprocess.Popen(cmd, stdout=subprocess.PIPE)
@@ -124,6 +127,7 @@ class Zone(object):
         return cls(name)
 
     def do_zsk(self):
+        """Perform daily routine on ZSK keys (generate new keys, delete old ones...)"""
         for zsk in self.ZSK:
             if zsk.is_activate:
                 zsk.inactive = zsk.activate + ZSK_VALIDITY
@@ -139,6 +143,7 @@ class Zone(object):
             zsk.activate = last_activate_zsk.inactive
 
     def do_ksk(self):
+        """Perform daily routine on KSK keys (generate new keys...)"""
         ksk = self.KSK[-1]
         if ksk.need_renew:
             now = datetime.datetime.utcnow()
@@ -157,6 +162,10 @@ class Zone(object):
             )
 
     def ds_seen(self, keyid):
+        """
+            Specify that the DS for the KSK ``keyid`` has been seen in the parent zone, programming
+            KSK rotation.
+        """
         old_ksks = []
         for ksk in self.KSK:
             if ksk.keyid == keyid:
@@ -179,6 +188,7 @@ class Zone(object):
         bind_reload()
 
     def remove_deleted(self):
+        """Move deleted keys to the deleted folder"""
         deleted_path = os.path.join(self._path, "deleted")
         try:
             os.mkdir(deleted_path)
@@ -194,12 +204,14 @@ class Zone(object):
                     os.rename(path, new_path)
 
     def ds(self):
+        """Display the DS of the KSK of the zone"""
         for ksk in self.KSK:
             cmd = [DNSSEC_DSFROMKEY, ksk._path]
             p = subprocess.Popen(cmd)
             p.wait()
 
     def key(self, show_ksk=False, show_zsk=False):
+        """Displays the public keys of the KSK and/or ZSK"""
         if show_ksk:
             for ksk in self.KSK:
                 print(ksk)
@@ -254,6 +266,7 @@ class Zone(object):
         print(separator)
 
     def key_table(self, show_creation=False):
+        """Show meta data for the zone keys in a table"""
         znl = len(self.name)
         self._key_table_header(znl, show_creation)
         self._key_table_body(znl, show_creation)
