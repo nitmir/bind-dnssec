@@ -13,26 +13,25 @@ from functools import total_ordering
 
 
 BASE = "/etc/bind/keys"
-# Interval entre 2 opérations sur les clefs dns.
-# Par exemple si vous avec la clef1 d'utilisé,
-# clef2 est publié INTERVAL avant la désactivation de clef1.
-# clef1 est désactivé quand clef2 est activé,
-# clef2 est supprimé INTRERVAL après sa désactivation.
-# INTERVAL DOIT être supérieur aux plus long TTL que les enregistrement DS peuvent avoir.
-# INTERVAL DOIT egalement être supérieur a l'intervale de signature de bind (défaut de 22.5 jours)
-# Cela dépent essentiellement de la configuration de la zone parente et vous n'avez pas forcement
-# de controle dessus.
+
+# Interval between 2 operations on the dns keys.
+# For example if you have KEY1 enabled, KEY2 is published INTERVAL before disabling KEY1. KEY1 is
+# disabled when KEY2 is activated, KEY2 is deleted INTERVAL after being disabled.
+# INTERVAL MUST be greater than the longest TTL that the DS records can have 
+# INTERVAL MUST also be higher in the bind signature interval (default 22.5 days)
+# This mainly depents of the parent zone configuration and you do not necessarily have
+# control over it.
 INTERVAL = datetime.timedelta(days=23)
-# Durée au bout de laquelle une ZSK est remplacé par une nouvelle ZSK.
-# La génération des ZSK et leur activation/désactivation/suppression est géré
-# automatiquement tant que routine.py -c est appelé au moins une fois par
-# jour.
-ZSK_VALIDITY = datetime.timedelta(days=30)  # ~1 mois
-# Temps au bout duquelle une nouvelle KSK est généré et publié pour la zone
-# (et activé après INTERVAL). L'ancienne clef n'est retiré que INTERVAL après que la nouvelle
-# clef a été routine.py --ds-seen. Cela demande en général une opération
-# manuelle avec le registrar (publier le DS de la nouvelle clef dans la zone parente)
-# et routine.py -c affiche un message tant que cela n'a pas été fait.
+
+# Time after which a ZSK is replaced by a new ZSK.
+# Generation of ZSK and activation / deactivation / deletion is managed automatically as long as
+# routine.py -c is called at least once a day.
+ZSK_VALIDITY = datetime.timedelta(days=30)  # ~1 month
+
+# Time after which a new KSK is generated and published for the zone (and activated after INTERVAL).
+# The old key is removed only INTERVAL after the new key was routine.py --ds-seen. This usually
+# requires a manual operation with the registrar (publish DS of the new key in the parent zone).
+# routine.py -c displays a message as long as --ds-seen needs to be called and has not yet be called
 KSK_VALIDITY = datetime.timedelta(days=366)  # ~1 an
 
 
@@ -275,7 +274,7 @@ class Zone(object):
     def __init__(self, name):
         path = os.path.join(BASE, name)
         if not os.path.isdir(path):
-            raise ValueError("%s n'est pas un dossier" % path)
+            raise ValueError("%s is not a directory" % path)
         self.name = name
         self._path = path
         self.ZSK = []
@@ -376,7 +375,7 @@ class Key(object):
         p = subprocess.Popen(cmd, stdout=subprocess.PIPE)
         p.wait()
         if p.returncode != 0:
-            raise ValueError("La creation de la clef a echoue")
+            raise ValueError("The key creation has failed")
         keyname = p.communicate()[0].strip()
         bind_chown(path)
         return cls(os.path.join(path, "%s.private" % keyname))
@@ -489,12 +488,12 @@ class Key(object):
 
     def __init__(self, path):
         if not path.endswith(".private"):
-            raise ValueError("%s n'est pas une clef valide" % path)
+            raise ValueError("%s is not a valid private key (should ends with .private)" % path)
         if not os.path.isfile(path):
-            raise ValueError("%s n'existe pas" % path)
+            raise ValueError("%s do not exists" % path)
         ppath = "%s.key" % path[:-8]
         if not os.path.isfile(ppath):
-            raise ValueError("la clef publique (%s) de %s n'existe pas" % (ppath, path))
+            raise ValueError("The public key (%s) of %s does not exist" % (ppath, path))
         with open(ppath, 'r') as f:
             self._data = f.read()
         with open(path, 'r') as f:
@@ -506,13 +505,12 @@ class Key(object):
             line = line.split()
             if len(line) < 7:
                 raise ValueError(
-                    "La clef publique %s devrait avoir au moins 7 champs: %r" % (ppath, line)
+                    "The public key %s should have at least 7 fields: %r" % (ppath, line)
                 )
             if not line[0].endswith('.'):
                 raise ValueError(
                     (
-                        "La clef publique %s devrait commencer par le fqdn "
-                        "(finissant par un .) de la zone"
+                        "The public key %s should begin with the zone fqdn (ending with a .)"
                     ) % ppath
                 )
             self.zone_name = line[0][:-1]
@@ -520,21 +518,26 @@ class Key(object):
                 self.flag = int(line[3])
             except ValueError:
                 raise ValueError(
-                    "Le flag %s de la clef publique %s devrait être un entier" % (line[3], ppath)
+                    "The flag %s of the public key %s should be an integer" % (line[3], ppath)
                 )
         if self.flag == 256:
             self.type = "ZSK"
         elif self.flag == 257:
             self.type = "KSK"
         else:
-            raise ValueError("%s n'est pas une clef valide: flag %s inconnu" % (ppath, self.flag))
+            raise ValueError(
+                "%s is not a valid key: flag %s unknown (known ones are 256 and 257)" % (
+                    ppath,
+                    self.flag
+                )
+            )
         self._path = ppath
         self._path_private = path
         keyid = path.split('.')[-2].split('+')[-1]
         try:
             self.keyid = int(keyid)
         except ValueError:
-            raise ValueError("Le keyid %s de la clef %s devrait être un entier" % (keyid, path))
+            raise ValueError("The keyid %s of the key %s should be an integer" % (keyid, path))
         for line in private_data.split("\n"):
             if line.startswith("Created:"):
                 self._created = line[8:].strip()
@@ -552,7 +555,7 @@ class Key(object):
                 self._delete = line[7:].strip()
                 self._date_from_key(self._delete)
         if self.created is None:
-            raise ValueError("La clef %s doit au moins avoir le champs Created de définit" % path)
+            raise ValueError("The key %s must have as list its Created field defined" % path)
 
     def __lt__(self, y):
         if not isinstance(y, Key):

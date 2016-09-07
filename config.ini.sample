@@ -1,36 +1,39 @@
 [dnssec]
 base_directory=/etc/bind/keys
 
-# Interval entre 2 opérations sur les clefs dns en jour. Vous pouvez utiliser un flotant.
-# Par exemple si vous avez la clef1 d'utilisé,
-# clef2 est publié INTERVAL avant la désactivation de clef1.
-# clef1 est désactivé quand clef2 est activé,
-# clef2 est supprimé INTRERVAL après sa désactivation.
-# INTERVAL DOIT être supérieur aux plus long TTL que les enregistrement DS peuvent avoir.
-# INTERVAL DOIT egalement être supérieur à l'intervale de signature de bind (défaut de 22.5 jours)
-# Cela dépent essentiellement de la configuration de la zone parente et vous n'avez pas forcement
-# de controle dessus.
+# Interval between 2 operations on the dns keys.
+# For example if you have KEY1 enabled, KEY2 is published INTERVAL before disabling KEY1. KEY1 is
+# disabled when KEY2 is activated, KEY2 is deleted INTERVAL after being disabled.
+# INTERVAL MUST be greater than the longest TTL that the DS records can have 
+# INTERVAL MUST also be higher in the bind signature interval (default 22.5 days)
+# This mainly depents of the parent zone configuration and you do not necessarily have
+# control over it.
 interval=23
 
 
-# Durée au bout de laquelle une ZSK est remplacé par une nouvelle ZSK.
-# La génération des ZSK et leur activation/désactivation/suppression est géré
-# automatiquement tant que routine.py -c est appelé au moins une fois par
-# jour.
+# Time after which a ZSK is replaced by a new ZSK.
+# Generation of ZSK and activation / deactivation / deletion is managed automatically as long as
+# routine.py -c is called at least once a day.
 zsk_validity=30
 
 
-# Temps au bout duquelle une nouvelle KSK est généré et publié pour la zone
-# (et activé après INTERVAL). L'ancienne clef n'est retiré que INTERVAL après que la nouvelle
-# clef a été routine.py --ds-seen. Cela demande en général une opération
-# manuelle avec le registrar (publier le DS de la nouvelle clef dans la zone parente)
-# et routine.py -c affiche un message tant que cela n'a pas été fait.
+# Time after which a new KSK is generated and published for the zone (and activated after INTERVAL).
+# The old key is removed only INTERVAL after the new key was routine.py --ds-seen. This usually
+# requires a manual operation with the registrar (publish DS of the new key in the parent zone).
+# routine.py -c displays a message as long as --ds-seen needs to be called and has not yet be called
 ksk_validity=366
 
 
 [path]
 
+# path to the dnssec-settime binary
 dnssec_settime=/usr/sbin/dnssec-settime
+
+# path to the dnssec-dsfromkey binary
 dnssec_dsfromkey=/usr/sbin/dnssec-dsfromkey
+
+# path to the dnssec-keygen binary
 dnssec_keygen=/usr/sbin/dnssec-keygen
+
+# path to the rndc binary
 rndc=/usr/sbin/rndc
