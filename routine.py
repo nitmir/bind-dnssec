@@ -220,11 +220,11 @@ class Zone(object):
 
     @staticmethod
     def _key_table_format(znl, show_creation=False):
-        format_string = "|{!s:^%d}|{}|" % znl
+        format_string = "|{!s:^%d}|{}|{!s:>5}|" % znl
         if show_creation:
             format_string += "{created!s:^19}|"
         format_string += "{!s:^19}|{!s:^19}|{!s:^19}|{!s:^19}|"
-        separator = ("+" + "-" * znl + "+-+" + ("-" * 19 + "+") * (5 if show_creation else 4))
+        separator = ("+" + "-" * znl + "+-+-----+" + ("-" * 19 + "+") * (5 if show_creation else 4))
         return (format_string, separator)
 
     @classmethod
@@ -232,7 +232,8 @@ class Zone(object):
         (format_string, separator) = cls._key_table_format(znl, show_creation)
         print(separator)
         print(format_string.format(
-            "Zone name", "T", "Publish", "Activate", "Inactive", "Delete", created="Created"
+            "Zone name", "T", "KeyId", "Publish", "Activate",
+            "Inactive", "Delete", created="Created"
         ))
         print(separator)
 
@@ -242,6 +243,7 @@ class Zone(object):
             print(format_string.format(
                 ksk.zone_name,
                 "K",
+                ksk.keyid,
                 ksk.publish or "N/A",
                 ksk.activate or "N/A",
                 ksk.inactive or "N/A",
@@ -252,6 +254,7 @@ class Zone(object):
             print(format_string.format(
                 zsk.zone_name,
                 "Z",
+                zsk.keyid,
                 zsk.publish or "N/A",
                 zsk.activate or "N/A",
                 zsk.inactive or "N/A",
