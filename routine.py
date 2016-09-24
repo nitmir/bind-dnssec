@@ -128,7 +128,7 @@ class Zone(object):
     def do_zsk(self):
         """Perform daily routine on ZSK keys (generate new keys, delete old ones...)"""
         for zsk in self.ZSK:
-            if zsk.is_activate:
+            if zsk.is_activate and not zsk.is_inactive:
                 zsk.inactive = zsk.activate + ZSK_VALIDITY
                 zsk.delete = zsk.inactive + INTERVAL
                 last_activate_zsk = zsk
