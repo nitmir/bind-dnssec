@@ -1,5 +1,7 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # -*- coding: utf8 -*-
+
+from __future__ import print_function
 
 import os
 import sys
@@ -7,7 +9,10 @@ import datetime
 import subprocess
 import argparse
 import pwd
-import ConfigParser
+try:
+    import ConfigParser
+except ImportError:
+    import configparser
 
 from functools import total_ordering
 
@@ -574,7 +579,7 @@ class Key(object):
         return isinstance(y, Key) and y._path == self._path
 
 if __name__ == '__main__':
-    config_parser = ConfigParser.ConfigParser()
+    config_parser = configparser.ConfigParser()
     config_file = os.path.abspath(os.path.join(os.path.dirname(__file__), 'config.ini'))
 
     if os.path.isfile(config_file):
