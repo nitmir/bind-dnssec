@@ -586,7 +586,7 @@ class Key(object):
                 self._date_from_key(self._delete)
             elif line.startswith("Algorithm:"):
                 algorithm = int(line[11:13].strip())
-                self.algorithm = SUPPORTED_ALGORITHMS[algorithm]
+                self.algorithm = SUPPORTED_ALGORITHMS.get(algorithm, "Unknown (%d)" % algorithm)
         if self.created is None:
             raise ValueError("The key %s must have as list its Created field defined" % path)
 
