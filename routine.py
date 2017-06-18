@@ -236,18 +236,18 @@ class Zone(object):
                 print(zsk)
 
     @staticmethod
-    def _key_table_format(znl, show_creation=False):
+    def _key_table_format(znl, show_all=False):
         format_string = "|{!s:^%d}|{}|{!s:>5}|" % znl
-        if show_creation:
+        if show_all:
             format_string += "{algorithm!s:^19}|"
             format_string += "{created!s:^19}|"
         format_string += "{!s:^19}|{!s:^19}|{!s:^19}|{!s:^19}|"
-        separator = ("+" + "-" * znl + "+-+-----+" + ("-" * 19 + "+") * (6 if show_creation else 4))
+        separator = ("+" + "-" * znl + "+-+-----+" + ("-" * 19 + "+") * (6 if show_all else 4))
         return (format_string, separator)
 
     @classmethod
-    def _key_table_header(cls, znl, show_creation=False):
-        (format_string, separator) = cls._key_table_format(znl, show_creation)
+    def _key_table_header(cls, znl, show_all=False):
+        (format_string, separator) = cls._key_table_format(znl, show_all)
         print(separator)
         print(format_string.format(
             "Zone name", "T", "KeyId", "Publish", "Activate",
@@ -255,8 +255,8 @@ class Zone(object):
         ))
         print(separator)
 
-    def _key_table_body(self, znl, show_creation=False):
-        (format_string, separator) = self._key_table_format(znl, show_creation)
+    def _key_table_body(self, znl, show_all=False):
+        (format_string, separator) = self._key_table_format(znl, show_all)
         for ksk in self.KSK:
             print(format_string.format(
                 ksk.zone_name,
@@ -283,16 +283,16 @@ class Zone(object):
             ))
 
     @classmethod
-    def _key_table_footer(cls, znl, show_creation=False):
-        (format_string, separator) = cls._key_table_format(znl, show_creation)
+    def _key_table_footer(cls, znl, show_all=False):
+        (format_string, separator) = cls._key_table_format(znl, show_all)
         print(separator)
 
-    def key_table(self, show_creation=False):
+    def key_table(self, show_all=False):
         """Show meta data for the zone keys in a table"""
         znl = max(len(self.name), 9)
-        self._key_table_header(znl, show_creation)
-        self._key_table_body(znl, show_creation)
-        self._key_table_footer(znl, show_creation)
+        self._key_table_header(znl, show_all)
+        self._key_table_body(znl, show_all)
+        self._key_table_footer(znl, show_all)
 
     def __init__(self, name):
         path = os.path.join(BASE, name)
