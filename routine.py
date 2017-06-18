@@ -153,9 +153,9 @@ class Zone(object):
         if ksk.need_renew:
             now = datetime.datetime.utcnow()
             new_ksk = Key.create("KSK", self.name)
-            new_ksk.publish = now
             # do not activate the new key until ds-seen
             new_ksk.activate = None
+            new_ksk.publish = now
             bind_reload()
         active_ksk = [key for key in self.KSK if key.is_publish and key.delete is None]
         if len(active_ksk) >= 2:
@@ -490,9 +490,15 @@ class Key(object):
     @property
     def need_renew(self):
         if self.type == "KSK":
-            return (self.activate + KSK_VALIDITY) <= (datetime.datetime.utcnow() + INTERVAL)
+            return (
+                self.activate is not None and
+                (self.activate + KSK_VALIDITY) <= (datetime.datetime.utcnow() + INTERVAL)
+            )
         elif self.type == "ZSK":
-            return (self.activate + ZSK_VALIDITY) <= (datetime.datetime.utcnow() + INTERVAL)
+            return (
+                self.activate is not None
+                and (self.activate + ZSK_VALIDITY) <= (datetime.datetime.utcnow() + INTERVAL)
+            )
         else:
             raise RuntimeError("impossible")
 
