@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
 # -*- coding: utf8 -*-
 
-from __future__ import print_function
+from __future__ import print_function, unicode_literals
 
 import os
 import sys
+import binascii
 import datetime
 import subprocess
 import argparse
 import pwd
 try:
-    import ConfigParser
+    import ConfigParser as configparser
 except ImportError:
     import configparser
 
@@ -46,6 +47,11 @@ DNSSEC_KEYGEN = "/usr/sbin/dnssec-keygen"
 RNDC = "/usr/sbin/rndc"
 
 
+def _print(data, file=sys.stdout):
+    if sys.version_info.major >= 3 and isinstance(data, bytes):
+        data = data.decode("utf-8")
+    print(data, file=file)
+
 def get_zones(zone_names=None):
     l = []
     if zone_names is None:
@@ -70,7 +76,7 @@ def settime(path, flag, date):
     if p.returncode != 0:
         raise ValueError("err %s: %s" % (p.returncode, err))
     if err:
-        sys.stderr.write("%s\n" % err)
+        _print("%s" % err, file=sys.stderr)
 
 
 def bind_chown(path):
@@ -86,7 +92,7 @@ def bind_chown(path):
             for momo in files:
                 os.chown(os.path.join(root, momo), bind_uid, -1)
     except KeyError:
-        sys.stderr.write("User bind not found, failing to give keys ownership to bind\n")
+        _print("User bind not found, failing to give keys ownership to bind", file=sys.stderr)
 
 
 def bind_reload():
@@ -99,10 +105,10 @@ def bind_reload():
 def nsec3(zone, salt="-"):
     """Enable nsec3 for the zone ``zone``"""
     cmd = [RNDC, "signing", "-nsec3param", "1", "0", "10", salt, zone]
-    sys.stdout.write("Enabling nsec3 for zone %s: " % zone)
+    _print("Enabling nsec3 for zone %s: " % zone, file=sys.stdout)
     p = subprocess.Popen(cmd, stdout=subprocess.PIPE)
     out = p.communicate()[0]
-    sys.stdout.write(out)
+    _print(out, file=sys.stdout)
     p.wait()
 
 
@@ -158,11 +164,12 @@ class Zone(object):
             bind_reload()
         active_ksk = [key for key in self.KSK if key.is_publish and key.delete is None]
         if len(active_ksk) >= 2:
-            sys.stderr.write(
+            _print(
                 (
                     "New KSK needs DS seen and/or old KSK needs "
-                    "inactivate/remove for zone %s\n"
-                ) % self.name
+                    "inactivate/remove for zone %s"
+                ) % self.name,
+                file=sys.stderr
             )
 
     def ds_seen(self, keyid):
@@ -177,14 +184,14 @@ class Zone(object):
                 break
             old_ksks.append(ksk)
         else:
-            sys.stderr.write("Key not found\n")
+            _print("Key not found", file=sys.stderr)
             return
-        print("Key %s found" % keyid)
+        _print("Key %s found" % keyid)
         now = datetime.datetime.utcnow()
         if seen_ksk.activate is None:
             seen_ksk.activate = (now + INTERVAL)
         for ksk in old_ksks:
-            print(" * program key %s removal" % ksk.keyid)
+            _print(" * program key %s removal" % ksk.keyid)
             # set inactive in at least INTERVAL
             ksk.inactive = seen_ksk.activate
             # delete INTERVAL after being inactive
@@ -218,10 +225,10 @@ class Zone(object):
         """Displays the public keys of the KSK and/or ZSK"""
         if show_ksk:
             for ksk in self.KSK:
-                print(ksk)
+                _print(ksk)
         if show_zsk:
             for zsk in self.ZSK:
-                print(zsk)
+                _print(zsk)
 
     @staticmethod
     def _key_table_format(znl, show_creation=False):
@@ -235,17 +242,17 @@ class Zone(object):
     @classmethod
     def _key_table_header(cls, znl, show_creation=False):
         (format_string, separator) = cls._key_table_format(znl, show_creation)
-        print(separator)
-        print(format_string.format(
+        _print(separator)
+        _print(format_string.format(
             "Zone name", "T", "KeyId", "Publish", "Activate",
             "Inactive", "Delete", created="Created"
         ))
-        print(separator)
+        _print(separator)
 
     def _key_table_body(self, znl, show_creation=False):
         (format_string, separator) = self._key_table_format(znl, show_creation)
         for ksk in self.KSK:
-            print(format_string.format(
+            _print(format_string.format(
                 ksk.zone_name,
                 "K",
                 ksk.keyid,
@@ -256,7 +263,7 @@ class Zone(object):
                 created=ksk.created or "N/A",
             ))
         for zsk in self.ZSK:
-            print(format_string.format(
+            _print(format_string.format(
                 zsk.zone_name,
                 "Z",
                 zsk.keyid,
@@ -270,7 +277,7 @@ class Zone(object):
     @classmethod
     def _key_table_footer(cls, znl, show_creation=False):
         (format_string, separator) = cls._key_table_format(znl, show_creation)
-        print(separator)
+        _print(separator)
 
     def key_table(self, show_creation=False):
         """Show meta data for the zone keys in a table"""
@@ -299,7 +306,7 @@ class Zone(object):
                     else:
                         raise RuntimeError("impossible")
                 except ValueError as error:
-                    sys.stderr.write("%s\n" % error)
+                    _print("%s" % error, sys.stderr)
         self.ZSK.sort()
         self.KSK.sort()
         if not self.ZSK:
@@ -398,7 +405,7 @@ class Key(object):
         if p.returncode != 0:
             raise ValueError("err %s: %s" % (p.returncode, err))
         if err:
-            print(err)
+            _print(err)
         bind_chown(os.path.dirname(self._path))
 
     @property
@@ -591,8 +598,9 @@ if __name__ == '__main__':
                 try:
                     INTERVAL = datetime.timedelta(days=config_parser.getfloat("dnssec", "interval"))
                 except ValueError:
-                    sys.stderr.write(
-                        "Unable to convert the config parameter 'interval' to a float\n"
+                    _print(
+                        "Unable to convert the config parameter 'interval' to a float",
+                        file=sys.stderr
                     )
             if config_parser.has_option("dnssec", "zsk_validity"):
                 try:
@@ -600,8 +608,9 @@ if __name__ == '__main__':
                         days=config_parser.getfloat("dnssec", "zsk_validity")
                     )
                 except ValueError:
-                    sys.stderr.write(
-                        "Unable to convert the config parameter 'zsk_validity' to a float\n"
+                    _print(
+                        "Unable to convert the config parameter 'zsk_validity' to a float",
+                        file=sys.stderr
                     )
             if config_parser.has_option("dnssec", "ksk_validity"):
                 try:
@@ -609,8 +618,9 @@ if __name__ == '__main__':
                         days=config_parser.getfloat("dnssec", "ksk_validity")
                     )
                 except ValueError:
-                    sys.stderr.write(
-                        "Unable to convert the config parameter 'ksk_validity' to a float\n"
+                    _print(
+                        "Unable to convert the config parameter 'ksk_validity' to a float",
+                        file=sys.stderr
                     )
 
         if config_parser.has_section("path"):
@@ -625,8 +635,7 @@ if __name__ == '__main__':
 
     for path in [DNSSEC_SETTIME, DNSSEC_DSFROMKEY, DNSSEC_KEYGEN, RNDC]:
         if not os.path.isfile(path) or not os.access(path, os.X_OK):
-            sys.stderr.write("%s not found or not executable. Is bind9utils installed ?\n" % path)
-            sys.exit(1)
+            sys.exit("%s not found or not executable. Is bind9utils installed ?\n" % path)
 
     try:
         parser = argparse.ArgumentParser()
@@ -679,26 +688,25 @@ if __name__ == '__main__':
         args = parser.parse_args()
         zones = args.zone
         if args.show_config:
-            print("Key base path: %s" % BASE)
-            print("Interval between two operation: %s" % INTERVAL)
-            print("ZSK validity duration: %s" % ZSK_VALIDITY)
-            print("KSK validity duration: %s" % KSK_VALIDITY)
-            print("")
-            print("Path to dnssec-settime: %s" % DNSSEC_SETTIME)
-            print("Path to dnssec-dsfromkey: %s" % DNSSEC_DSFROMKEY)
-            print("Path to dnssec-keygen: %s" % DNSSEC_KEYGEN)
-            print("Path to rdnc: %s" % RNDC)
+            _print("Key base path: %s" % BASE)
+            _print("Interval between two operation: %s" % INTERVAL)
+            _print("ZSK validity duration: %s" % ZSK_VALIDITY)
+            _print("KSK validity duration: %s" % KSK_VALIDITY)
+            _print("")
+            _print("Path to dnssec-settime: %s" % DNSSEC_SETTIME)
+            _print("Path to dnssec-dsfromkey: %s" % DNSSEC_DSFROMKEY)
+            _print("Path to dnssec-keygen: %s" % DNSSEC_KEYGEN)
+            _print("Path to rdnc: %s" % RNDC)
         if args.make:
             for zone in zones:
                 Zone.create(zone)
         zones = get_zones(zones if zones else None)
         if args.nsec3:
             for zone in zones:
-                nsec3(zone.name, os.urandom(24).encode("hex"))
+                nsec3(zone.name, binascii.hexlify(os.urandom(24)).decode())
         if args.ds_seen:
             if len(zones) != 1:
-                sys.stderr.write("Please specify exactly ONE zone name\n")
-                sys.exit(1)
+                sys.exit("Please specify exactly ONE zone name\n")
             for zone in zones:
                 zone.ds_seen(args.ds_seen)
         if args.cron:
@@ -725,5 +733,4 @@ if __name__ == '__main__':
         ]):
             parser.print_help()
     except (ValueError, IOError) as error:
-        sys.stderr.write("%s\n" % error)
-        sys.exit(1)
+        sys.exit("%s\n" % error)
