@@ -40,6 +40,16 @@ ZSK_VALIDITY = datetime.timedelta(days=30)  # ~1 month
 # routine.py -c displays a message as long as --ds-seen needs to be called and has not yet be called
 KSK_VALIDITY = datetime.timedelta(days=366)  # ~1 an
 
+# Algorithm used to generate new keys.
+ALGORITHM = "RSASHA256"
+SUPPORTED_ALGORITHMS = {
+    8  : "RSASHA256",
+    10 : "RSASHA512",
+    12 : "ECCGOST",
+    13 : "ECDSAP256SHA256",
+    14 : "ECDSAP384SHA384",
+}
+
 
 DNSSEC_SETTIME = "/usr/sbin/dnssec-settime"
 DNSSEC_DSFROMKEY = "/usr/sbin/dnssec-dsfromkey"
@@ -98,7 +108,7 @@ def bind_reload():
 
 
 def nsec3(zone, salt="-"):
-    """Enable nsec3 for the zone ``zone``"""
+    """Enable NSEC3 for the zone ``zone``"""
     cmd = [RNDC, "signing", "-nsec3param", "1", "0", "10", salt, zone]
     print("Enabling nsec3 for zone %s: " % zone, file=sys.stdout)
     p = subprocess.Popen(cmd, stdout=subprocess.PIPE)
@@ -229,9 +239,10 @@ class Zone(object):
     def _key_table_format(znl, show_creation=False):
         format_string = "|{!s:^%d}|{}|{!s:>5}|" % znl
         if show_creation:
+            format_string += "{algorithm!s:^19}|"
             format_string += "{created!s:^19}|"
         format_string += "{!s:^19}|{!s:^19}|{!s:^19}|{!s:^19}|"
-        separator = ("+" + "-" * znl + "+-+-----+" + ("-" * 19 + "+") * (5 if show_creation else 4))
+        separator = ("+" + "-" * znl + "+-+-----+" + ("-" * 19 + "+") * (6 if show_creation else 4))
         return (format_string, separator)
 
     @classmethod
@@ -240,7 +251,7 @@ class Zone(object):
         print(separator)
         print(format_string.format(
             "Zone name", "T", "KeyId", "Publish", "Activate",
-            "Inactive", "Delete", created="Created"
+            "Inactive", "Delete", created="Created", algorithm="Algorithm"
         ))
         print(separator)
 
@@ -256,6 +267,7 @@ class Zone(object):
                 ksk.inactive or "N/A",
                 ksk.delete or "N/A",
                 created=ksk.created or "N/A",
+                algorithm=ksk.algorithm or "N/A",
             ))
         for zsk in self.ZSK:
             print(format_string.format(
@@ -267,6 +279,7 @@ class Zone(object):
                 zsk.inactive or "N/A",
                 zsk.delete or "N/A",
                 created=zsk.created or "N/A",
+                algorithm=zsk.algorithm or "N/A",
             ))
 
     @classmethod
@@ -325,6 +338,7 @@ class Key(object):
     keyid = None
     flag = None
     zone_name = None
+    algorithm = None
 
     def __str__(self):
         return self._data
@@ -373,7 +387,7 @@ class Key(object):
         if options is None:
             options = []
         path = os.path.join(BASE, name)
-        cmd = [DNSSEC_KEYGEN, "-a", "RSASHA256"]
+        cmd = [DNSSEC_KEYGEN, "-a", ALGORITHM]
         if typ == "KSK":
             cmd.extend(["-b", "2048", "-f", "KSK"])
         elif typ == "ZSK":
@@ -381,7 +395,7 @@ class Key(object):
         else:
             raise ValueError("typ must be KSK or ZSK")
         cmd.extend(options)
-        cmd.extend(["-K", path,  name])
+        cmd.extend(["-K", path, name])
         p = subprocess.Popen(cmd, stdout=subprocess.PIPE)
         p.wait()
         if p.returncode != 0:
@@ -570,6 +584,9 @@ class Key(object):
             elif line.startswith("Delete:"):
                 self._delete = line[7:].strip()
                 self._date_from_key(self._delete)
+            elif line.startswith("Algorithm:"):
+                algorithm = int(line[11:13].strip())
+                self.algorithm = SUPPORTED_ALGORITHMS[algorithm]
         if self.created is None:
             raise ValueError("The key %s must have as list its Created field defined" % path)
 
@@ -622,6 +639,13 @@ if __name__ == '__main__':
                     print(
                         "Unable to convert the config parameter 'ksk_validity' to a float",
                         file=sys.stderr
+                    )
+            if config_parser.has_option("dnssec", "algorithm"):
+                ALGORITHM = config_parser.get("dnssec", "algorithm")
+                if ALGORITHM not in SUPPORTED_ALGORITHMS.values():
+                    raise ValueError(
+                        "Invalid algorithm %s."
+                        "Supported algorithms are %s" % (ALGORITHM, ", ".join(SUPPORTED_ALGORITHMS))
                     )
 
         if config_parser.has_section("path"):
@@ -693,6 +717,7 @@ if __name__ == '__main__':
             print("Interval between two operation: %s" % INTERVAL)
             print("ZSK validity duration: %s" % ZSK_VALIDITY)
             print("KSK validity duration: %s" % KSK_VALIDITY)
+            print("DNSKEY algorithm: %s" % ALGORITHM)
             print("")
             print("Path to dnssec-settime: %s" % DNSSEC_SETTIME)
             print("Path to dnssec-dsfromkey: %s" % DNSSEC_DSFROMKEY)
