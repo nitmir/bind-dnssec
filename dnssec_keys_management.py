@@ -17,37 +17,39 @@ except ImportError:
 
 from functools import total_ordering
 
-
+# Directory where dnssec keys will be stored
 BASE = "/etc/bind/keys"
 
 # Interval between 2 operations on the dns keys.
 # For example if you have KEY1 enabled, KEY2 is published INTERVAL before disabling KEY1. KEY1 is
-# disabled when KEY2 is activated, KEY2 is deleted INTERVAL after being disabled.
-# INTERVAL MUST be greater than the longest TTL that the DS records can have
-# INTERVAL MUST also be higher in the bind signature interval (default 22.5 days)
-# This mainly depents of the parent zone configuration and you do not necessarily have
+# disabled when KEY2 is activated, KEY1 is deleted INTERVAL after being disabled.
+# INTERVAL MUST be greater than the longest TTL DS records can have.
+# INTERVAL MUST also be higher than the bind signature interval (default 22.5 days)
+# This partially depents of the parent zone configuration and you do not necessarily have
 # control over it.
 INTERVAL = datetime.timedelta(days=23)
 
 # Time after which a ZSK is replaced by a new ZSK.
 # Generation of ZSK and activation / deactivation / deletion is managed automatically as long as
-# routine.py -c is called at least once a day.
+# dnssec_keys_management.py -c is called at least once a day.
 ZSK_VALIDITY = datetime.timedelta(days=30)  # ~1 month
 
 # Time after which a new KSK is generated and published for the zone (and activated after INTERVAL).
-# The old key is removed only INTERVAL after the new key was routine.py --ds-seen. This usually
-# requires a manual operation with the registrar (publish DS of the new key in the parent zone).
-# routine.py -c displays a message as long as --ds-seen needs to be called and has not yet be called
+# The old key is removed only INTERVAL after the new key was dnssec_keys_management.py --ds-seen.
+# This usually requires a manual operation with the registrar (publish DS of the new key
+# in the parent zone). dnssec_keys_management.py -c displays a message as long as --ds-seen needs
+# to be called and has not yet be called
 KSK_VALIDITY = datetime.timedelta(days=366)  # ~1 an
 
 # Algorithm used to generate new keys.
 ALGORITHM = "RSASHA256"
+
 SUPPORTED_ALGORITHMS = {
-    8  : "RSASHA256",
-    10 : "RSASHA512",
-    12 : "ECCGOST",
-    13 : "ECDSAP256SHA256",
-    14 : "ECDSAP384SHA384",
+    8: "RSASHA256",
+    10: "RSASHA512",
+    12: "ECCGOST",
+    13: "ECDSAP256SHA256",
+    14: "ECDSAP384SHA384",
 }
 
 
@@ -602,6 +604,7 @@ class Key(object):
 
     def __eq__(self, y):
         return isinstance(y, Key) and y._path == self._path
+
 
 if __name__ == '__main__':
     config_parser = configparser.ConfigParser()
