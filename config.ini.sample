@@ -23,6 +23,9 @@ zsk_validity=30
 # routine.py -c displays a message as long as --ds-seen needs to be called and has not yet be called
 ksk_validity=366
 
+# Algorithm used to generate new keys.
+# Valid algorithms are RSASHA256, RSASHA512, ECCGOST, ECDSAP256SHA256, ECDSAP384SHA384.
+algorithm=RSASHA256
 
 [path]
 
