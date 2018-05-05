@@ -11,10 +11,15 @@ import datetime
 import subprocess
 import argparse
 import pwd
+import collections
 try:
     import ConfigParser as configparser
 except ImportError:
     import configparser
+try:
+    import dns.resolver
+except ImportError:
+    dns = None
 
 from functools import total_ordering
 
@@ -188,11 +193,58 @@ class Zone(object):
                 file=sys.stderr
             )
 
-    def ds_seen(self, keyid):
-        """
-            Specify that the DS for the KSK ``keyid`` has been seen in the parent zone, programming
-            KSK rotation.
-        """
+    def _get_ds_from_parents(self):
+        parent = '.'.join(self.name.split('.')[1:])
+        if not parent:
+            parent = '.'
+
+        NS = [ns.to_text() for ns in dns.resolver.query(parent, 'NS')]
+        NS_IPS = {ns: [ip.to_text() for ip in dns.resolver.query(ns)] for ns in NS}
+
+        DS = {}
+        for ns, ns_ips in NS_IPS.items():
+            for ns_ip in ns_ips:
+                r = dns.resolver.Resolver()
+                r.nameservers = [ns_ip]
+                DS[(ns, ns_ip)] = list(r.query(self.name, 'DS'))
+        return DS
+
+    def ds_check(self, keyid):
+        """Check if a DS with ``keyid`` is present in the parent zone."""
+        if dns is None:
+            print("Python dnspython module not availabled, check failed")
+            return False
+        ok = True
+        dses = self._get_ds_from_parents()
+        missings = collections.defaultdict(list)
+        founds = {}
+        for (ns, ns_ip), ds in dses.items():
+            keyids = set()
+            for d in ds:
+                if d.key_tag == keyid:
+                    break
+                keyids.add(d.key_tag)
+            else:
+                missings[ns].append(ns_ip)
+                founds[(ns, ns_ip)] = keyids
+                ok = False
+        if not ok:
+            print(
+                "DS for %s key %s not found on the following parent servers:" % (self.name, keyid)
+            )
+            for ns, ns_ips in missings.items():
+                print(" * %s (%s)" % (ns, ', '.join(ns_ips)))
+                for ip in ns_ips:
+                    keyids &= founds[(ns, ip)]
+            keyids = list(keyids)
+            keyids.sort()
+            print("Found keys are %s" % ', '.join(str(id_) for id_ in keyids))
+        else:
+            print("DS for key %s found on all parent servers" % keyid)
+        return ok
+
+    def ds_seen(self, keyid, check=True):
+        """Tell that the DS for the KSK ``keyid`` has been seen, programming KSK rotation."""
         old_ksks = []
         for ksk in self.KSK:
             if ksk.keyid == keyid:
@@ -203,6 +255,10 @@ class Zone(object):
             print("Key not found", file=sys.stderr)
             return
         print("Key %s found" % keyid)
+        if check:
+            if not self.ds_check(keyid):
+                print("You may use --no-check to bypass this check and force --ds-seen")
+                return
         now = datetime.datetime.utcnow()
         if seen_ksk.activate is None:
             seen_ksk.activate = (now + INTERVAL)
@@ -663,6 +719,11 @@ class Key(object):
             return self.created < y.created
 
     def __eq__(self, y):
+        """
+        Allow to check if two key instances are equals.
+
+        Two key instances are equals if they point to the same key file.
+        """
         return isinstance(y, Key) and y._path == self._path
 
 
@@ -765,7 +826,25 @@ if __name__ == '__main__':
             type=int,
             help=(
                 'To call with the ID of a new KSK published in the parent zone. '
-                'Programs old KSK removal'
+                'Programs old KSK removal. '
+                'If will check that the KSK key id appear in one DS of each servers of the parent '
+                'zone, except if called with --no-check.'
+            )
+        )
+        parser.add_argument(
+            '--no-check',
+            action='store_true',
+            help='Allow to bypass DS check from parent zone in --ds-seen'
+        )
+        parser.add_argument(
+            '--ds-check',
+            metavar='KEYID',
+            type=int,
+            help=(
+                'To call with the ID of a KSK published in the parent zone. '
+                'Check that the KSK key id appear in one DS of each servers of the parent zone. '
+                'Note that this just check for key id, it not not check that the DS digest mach '
+                'the KSK. '
             )
         )
         parser.add_argument(
@@ -803,7 +882,12 @@ if __name__ == '__main__':
             if len(zones) != 1:
                 sys.exit("Please specify exactly ONE zone name\n")
             for zone in zones:
-                zone.ds_seen(args.ds_seen)
+                zone.ds_seen(args.ds_seen, check=not args.no_check)
+        if args.ds_check:
+            if len(zones) != 1:
+                sys.exit("Please specify exactly ONE zone name\n")
+            for zone in zones:
+                zone.ds_check(args.ds_check)
         if args.cron:
             for zone in zones:
                 zone.do_zsk()
@@ -824,7 +908,7 @@ if __name__ == '__main__':
             Zone._key_table_footer(znl, args.key_table == "all_fields")
         if not any([
             args.make, args.cron, args.ds, args.key, args.ds_seen, args.nsec3,
-            args.show_config, args.key_table
+            args.show_config, args.key_table, args.ds_check
         ]):
             parser.print_help()
     except (ValueError, IOError) as error:
