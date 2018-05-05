@@ -416,9 +416,9 @@ class Key(object):
         path = os.path.join(BASE, name)
         cmd = [DNSSEC_KEYGEN, "-a", ALGORITHM]
         if typ == "KSK":
-            cmd.extend(["-b", "2048", "-f", "KSK"])
+            cmd.extend(["-b", KSK_SIZE, "-f", "KSK"])
         elif typ == "ZSK":
-            cmd.extend(["-b", "1024"])
+            cmd.extend(["-b", ZSK_SIZE])
         else:
             raise ValueError("typ must be KSK or ZSK")
         cmd.extend(options)
@@ -700,6 +700,12 @@ if __name__ == '__main__':
                         "Invalid algorithm %s."
                         "Supported algorithms are %s" % (ALGORITHM, ", ".join(SUPPORTED_ALGORITHMS))
                     )
+
+            if config_parser.has_option("dnssec", "zsk_size"):
+                ZSK_SIZE = config_parser.get("dnssec", "zsk_size")
+
+            if config_parser.has_option("dnssec", "ksk_size"):
+                KSK_SIZE = config_parser.get("dnssec", "ksk_size")
 
         if config_parser.has_section("path"):
             if config_parser.has_option("path", "dnssec_settime"):
