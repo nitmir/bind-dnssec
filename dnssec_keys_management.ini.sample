@@ -8,7 +8,7 @@ base_directory=/etc/bind/keys
 # disabled when KEY2 is activated, KEY1 is deleted INTERVAL after being disabled.
 # INTERVAL MUST be greater than the longest TTL DS records can have.
 # INTERVAL MUST also be higher than the bind signature interval (default 22.5 days)
-# This partially depents of the parent zone configuration and you do not necessarily have
+# This partially depends of the parent zone configuration and you do not necessarily have
 # control over it.
 interval=23
 
@@ -26,18 +26,18 @@ zsk_validity=30
 ksk_validity=366
 
 # Algorithm used to generate new keys. Only the first created KSK and ZSK of a zone will use
-# this algorithm. Any renewed key will use the exact same parameters (name, algorithm, size,
+# this algorithm. Any renewing key will use the exact same parameters (name, algorithm, size,
 # and type) as the renewed key.
 # Valid algorithms are RSASHA256, RSASHA512, ECCGOST, ECDSAP256SHA256, ECDSAP384SHA384.
 algorithm=RSASHA256
 
 # Size of the created KSK. Only the first created KSK of a zone will use this size.
-# Any renewed key will use the exact same parameters (name, algorithm, size, and type)
+# Any renewing key will use the exact same parameters (name, algorithm, size, and type)
 # as the renewed key.
 ksk_size=2024
 
 # Size of the created ZSK. Only the first created ZSK of a zone will use this size.
-# Any renewed key will use the exact same parameters (name, algorithm, size, and type)
+# Any renewing key will use the exact same parameters (name, algorithm, size, and type)
 # as the renewed key.
 zsk_size=1024
 

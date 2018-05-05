@@ -47,7 +47,7 @@ class Config(object):  # pylint: disable=locally-disabled,too-many-instance-attr
     KSK_VALIDITY = datetime.timedelta(days=366)  # ~1 year
 
     # Algorithm used to generate new keys. Only the first created KSK and ZSK of a zone will use
-    # this algorithm. Any renewed key will use the exact same parameters (name, algorithm, size,
+    # this algorithm. Any renewing key will use the exact same parameters (name, algorithm, size,
     # and type) as the renewed key.
     ALGORITHM = "RSASHA256"
 
@@ -67,12 +67,12 @@ class Config(object):  # pylint: disable=locally-disabled,too-many-instance-attr
     }
 
     # Size of the created KSK. Only the first created KSK of a zone will use this size.
-    # Any renewed key will use the exact same parameters (name, algorithm, size, and type)
+    # Any renewing key will use the exact same parameters (name, algorithm, size, and type)
     # as the renewed key
     KSK_SIZE = "2048"
 
     # Size of the created ZSK. Only the first created ZSK of a zone will use this size.
-    # Any renewed key will use the exact same parameters (name, algorithm, size, and type)
+    # Any renewing key will use the exact same parameters (name, algorithm, size, and type)
     # as the renewed key.
     ZSK_SIZE = "1024"
 
