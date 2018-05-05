@@ -94,21 +94,6 @@ def get_zones(zone_names=None):
     return l
 
 
-def settime(path, flag, date):
-    """Set the time of the flag ``flag`` for the key at ``path`` to ``date``"""
-    cmd = [
-        DNSSEC_SETTIME,
-        "-i", str(int(INTERVAL.total_seconds())),
-        "-%s" % flag, date, path
-    ]
-    p = subprocess.Popen(cmd, stderr=subprocess.PIPE, stdout=subprocess.PIPE)
-    err = p.communicate()[1].decode()
-    if p.returncode != 0:
-        raise ValueError("err %s: %s" % (p.returncode, err))
-    if err:
-        print("%s" % err, file=sys.stderr)
-
-
 def bind_chown(path):
     """Give the files to the bind user and sets the modes in a relevant way."""
     try:
@@ -155,6 +140,17 @@ class Zone(object):
         os.mkdir(path)
         bind_chown(path)
         return cls(name)
+
+    def nsec3(self, salt=None):
+        """Enable NSEC3 for the zone ``zone``."""
+        if salt is None:
+            salt = binascii.hexlify(os.urandom(24)).decode()
+        cmd = [RNDC, "signing", "-nsec3param", "1", "0", "10", salt, self.name]
+        print("Enabling nsec3 for zone %s: " % self.name, file=sys.stdout)
+        p = subprocess.Popen(cmd, stdout=subprocess.PIPE)
+        out = p.communicate()[0].decode()
+        print(out, file=sys.stdout)
+        p.wait()
 
     def do_zsk(self):
         """Perform daily routine on ZSK keys (generate new keys, delete old ones...)."""
@@ -451,6 +447,20 @@ class Key(object):
             print(err)
         bind_chown(os.path.dirname(self._path))
 
+    def settime(self, flag, date):
+        """Set the time of the flag ``flag`` for the key to ``date``."""
+        cmd = [
+            DNSSEC_SETTIME,
+            "-i", str(int(INTERVAL.total_seconds())),
+            "-%s" % flag, date, self._path
+        ]
+        p = subprocess.Popen(cmd, stderr=subprocess.PIPE, stdout=subprocess.PIPE)
+        err = p.communicate()[1].decode()
+        if p.returncode != 0:
+            raise ValueError("err %s: %s" % (p.returncode, err))
+        if err:
+            print("%s" % err, file=sys.stderr)
+
     @property
     def created(self):
         """Date of creation of the key."""
@@ -469,7 +479,7 @@ class Key(object):
         self._date_check2(value, self.activate, "publish", "activate")
         date = self._date_to_key(value)
         if date != self._publish:
-            settime(self._path, 'P', date)
+            self.settime('P', date)
             self._publish = date
             with open(self._path, 'r') as f:
                 self._data = f.read()
@@ -486,7 +496,7 @@ class Key(object):
         self._date_check2(value, self.inactive, "activate", "inactive")
         date = self._date_to_key(value)
         if date != self._activate:
-            settime(self._path, 'A', date)
+            self.settime('A', date)
             self._activate = date
             with open(self._path, 'r') as f:
                 self._data = f.read()
@@ -503,7 +513,7 @@ class Key(object):
         self._date_check2(value, self.delete, "inactive", "delete")
         date = self._date_to_key(value)
         if date != self._inactive:
-            settime(self._path, 'I', date)
+            self.settime('I', date)
             self._inactive = date
             with open(self._path, 'r') as f:
                 self._data = f.read()
@@ -519,7 +529,7 @@ class Key(object):
         self._date_check(value, self.inactive, "delete", "inactive")
         date = self._date_to_key(value)
         if date != self._delete:
-            settime(self._path, 'D', date)
+            self.settime('D', date)
             self._delete = date
             with open(self._path, 'r') as f:
                 self._data = f.read()
@@ -788,7 +798,7 @@ if __name__ == '__main__':
         zones = get_zones(zones if zones else None)
         if args.nsec3:
             for zone in zones:
-                nsec3(zone.name, binascii.hexlify(os.urandom(24)).decode())
+                zone.nsec3()
         if args.ds_seen:
             if len(zones) != 1:
                 sys.exit("Please specify exactly ONE zone name\n")
