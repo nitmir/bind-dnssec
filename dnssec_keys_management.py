@@ -2,8 +2,6 @@
 # -*- coding: utf8 -*-
 # pylint: disable=locally-disabled,invalid-name
 """The script allow to manage bind dnssec keys (generate new keys and handle key rollover)."""
-
-from __future__ import print_function, unicode_literals
 import os
 import sys
 import binascii
@@ -12,11 +10,8 @@ import subprocess
 import argparse
 import pwd
 import collections
+import configparser
 from functools import total_ordering
-try:
-    import ConfigParser as configparser
-except ImportError:
-    import configparser
 try:
     import dns.resolver
 except ImportError:
@@ -34,7 +29,7 @@ class Config(object):  # pylint: disable=locally-disabled,too-many-instance-attr
     # is disabled when KEY2 is activated, KEY1 is deleted INTERVAL after being disabled.
     # INTERVAL MUST be greater than the longest TTL DS records can have.
     # INTERVAL MUST also be higher than the bind signature interval (default 22.5 days)
-    # This partially depents of the parent zone configuration and you do not necessarily have
+    # This partially depends of the parent zone configuration and you do not necessarily have
     # control over it.
     INTERVAL = datetime.timedelta(days=23)
 
@@ -111,7 +106,7 @@ class Config(object):  # pylint: disable=locally-disabled,too-many-instance-attr
         print("Path to dnssec-settime: %s" % self.DNSSEC_SETTIME)
         print("Path to dnssec-dsfromkey: %s" % self.DNSSEC_DSFROMKEY)
         print("Path to dnssec-keygen: %s" % self.DNSSEC_KEYGEN)
-        print("Path to rdnc: %s" % self. RNDC)
+        print("Path to rndc: %s" % self. RNDC)
 
     def __init__(self, path=None):
         """Parse the config file and update attributes accordingly."""
@@ -226,10 +221,10 @@ def bind_chown(path):
         bind_uid = pwd.getpwnam('bind').pw_uid
         os.chown(path, bind_uid, -1)
         for root, dirs, files in os.walk(path):
-            for momo in dirs:
-                os.chown(os.path.join(root, momo), bind_uid, -1)
-            for momo in files:
-                os.chown(os.path.join(root, momo), bind_uid, -1)
+            for dir_ in dirs:
+                os.chown(os.path.join(root, dir_), bind_uid, -1)
+            for file_ in files:
+                os.chown(os.path.join(root, file_), bind_uid, -1)
     except KeyError:
         print("User bind not found, failing to give keys ownership to bind", file=sys.stderr)
 
@@ -267,7 +262,7 @@ class Zone(object):
             config = Config()
         path = os.path.join(config.BASE, name)
         if os.path.isdir(path):
-            raise ValueError("%s existe" % path)
+            raise ValueError("%s exists" % path)
         os.mkdir(path)
         bind_chown(path)
         return cls(name, config=config)
@@ -328,7 +323,7 @@ class Zone(object):
         if not parent:
             parent = '.'
         nameservers = {
-            ns: [ip.to_text() for ip in dns.resolver.query(ns)]
+            ns.to_text(): [ip.to_text() for ip in dns.resolver.query(ns.to_text())]
             for ns in dns.resolver.query(parent, 'NS')
         }
 
@@ -341,18 +336,23 @@ class Zone(object):
         return ds
 
     def ds_check(self, keyid, key=None):
-        """Check if a DS with ``keyid`` is present in the parent zone."""
+        """
+        Check if a DS with ``keyid`` is present in the parent zone.
+
+        :param int keyid: A key id
+        :param Key key: A :class:`Key` instance
+        """
         if dns is None:
-            print("Python dnspython module not availabled, check failed", file=sys.stderr)
+            print("Python dnspython module not available, check failed", file=sys.stderr)
             return False
         if key is None:
             key = self._get_key_by_id(keyid)[0]
         if key is not None:
-            dses = self._get_ds_from_parents()
-            missings = collections.defaultdict(list)
+            ds_records = self._get_ds_from_parents()
+            missing = collections.defaultdict(list)
             bad_digest = collections.defaultdict(list)
             founds = {}
-            for (ns, ns_ip), ds in dses.items():
+            for (ns, ns_ip), ds in ds_records.items():
                 keyids = set()
                 for d in ds:
                     if d.key_tag == keyid:
@@ -366,13 +366,13 @@ class Zone(object):
                             break
                     keyids.add(d.key_tag)
                 else:
-                    missings[ns].append(ns_ip)
+                    missing[ns].append(ns_ip)
                     founds[(ns, ns_ip)] = keyids
-            if missings or bad_digest:
-                if missings:
+            if missing or bad_digest:
+                if missing:
                     print("DS not found on the following parent servers:", file=sys.stderr)
                     keyids = None
-                    for ns, ns_ips in missings.items():
+                    for ns, ns_ips in missing.items():
                         print(" * %s (%s)" % (ns, ', '.join(ns_ips)), file=sys.stderr)
                         for ip in ns_ips:
                             if keyids is None:
@@ -520,6 +520,7 @@ class Zone(object):
         znl = max(9, *[len(zone.name) for zone in zones])
         cls._key_table_header(znl, show_all)
         for zone in zones:
+            # noinspection PyProtectedMember
             zone._key_table_body(znl, show_all)  # pylint: disable=locally-disabled,protected-access
         cls._key_table_footer(znl, show_all)
 
@@ -627,7 +628,7 @@ class Key(object):
     @classmethod
     def create(cls, typ, name, options=None, config=None):
         """
-        Create a new dnssc key.
+        Create a new dnssec key.
 
         :param str typ: The type of the key to create. Most be 'KSK' or 'ZSK'.
         :param str name: The zone name for which we are creating the key.
@@ -662,7 +663,7 @@ class Key(object):
 
         The name, algorithm, size, and type of the key will be set to match the existing key.
         The activation date of the new key will be set to the inactivation date of the existing one.
-        The publication date will be set to the activation date minus the prepublication interval.
+        The publication date will be set to the activation date minus the pre-publication interval.
         """
         cmd = [
             self._cfg.DNSSEC_KEYGEN, "-i", str(int(self._cfg.INTERVAL.total_seconds())),
@@ -819,6 +820,7 @@ class Key(object):
         return out.decode('utf-8')
 
     def ds_digest(self, algorithm):
+        """Return raw DS digest of the key computed with ``algorithm``."""
         ds = self.ds(algorithm)
         return binascii.a2b_hex(ds.split()[-1])
 
@@ -842,10 +844,9 @@ class Key(object):
             raise ValueError("%s is not a valid private key (should ends with .private)" % path)
         if not os.path.isfile(path):
             raise ValueError("%s do not exists" % path)
-        ppath = "%s.key" % path[:-8]
-        if not os.path.isfile(ppath):
-            raise ValueError("The public key (%s) of %s does not exist" % (ppath, path))
-        self._path = ppath
+        self._path = "%s.key" % path[:-8]
+        if not os.path.isfile(self._path):
+            raise ValueError("The public key (%s) of %s does not exist" % (self._path, path))
         self._path_private = path
         self._parse_public_key()
         self._parse_private_key()
@@ -857,7 +858,7 @@ class Key(object):
         else:
             raise ValueError(
                 "%s is not a valid key: flag %s unknown (known ones are 256 and 257)" % (
-                    ppath,
+                    self._path,
                     self.flag
                 )
             )
@@ -949,11 +950,12 @@ class Key(object):
         Two key instances are equals if they point to the same key file.
         """
         # pylint: disable=locally-disabled,protected-access
+        # noinspection PyProtectedMember
         return isinstance(y, Key) and y._path == self._path
 
 
 def parse_arguments(config):
-    """Parse command ligne arguments."""
+    """Parse command line arguments."""
     parser = argparse.ArgumentParser()
     parser.add_argument('zone', nargs='*', help='A dns zone name.')
     parser.add_argument(
@@ -1027,7 +1029,7 @@ def parse_arguments(config):
 
 
 def main():  # pylint: disable=locally-disabled,too-many-branches
-    """Run functions based on command ligne arguments."""
+    """Run functions based on command line arguments."""
     config = Config()
     parser = parse_arguments(config)
     args = parser.parse_args()
