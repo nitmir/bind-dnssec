@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf8 -*-
+# pylint: disable=locally-disabled,invalid-name
 """The script allow to manage bind dnssec keys (generate new keys and handle key rollover)."""
 
 from __future__ import print_function, unicode_literals
-
 import os
 import sys
 import binascii
@@ -12,6 +12,7 @@ import subprocess
 import argparse
 import pwd
 import collections
+from functools import total_ordering
 try:
     import ConfigParser as configparser
 except ImportError:
@@ -21,82 +22,195 @@ try:
 except ImportError:
     dns = None
 
-from functools import total_ordering
 
-# Directory where dnssec keys will be stored
-BASE = "/etc/bind/keys"
+class Config(object):  # pylint: disable=locally-disabled,too-many-instance-attributes
+    """Holds configuration for dnssec keys management."""
 
-# Interval between 2 operations on the dns keys.
-# For example if you have KEY1 enabled, KEY2 is published INTERVAL before disabling KEY1. KEY1 is
-# disabled when KEY2 is activated, KEY1 is deleted INTERVAL after being disabled.
-# INTERVAL MUST be greater than the longest TTL DS records can have.
-# INTERVAL MUST also be higher than the bind signature interval (default 22.5 days)
-# This partially depents of the parent zone configuration and you do not necessarily have
-# control over it.
-INTERVAL = datetime.timedelta(days=23)
+    # Directory where dnssec keys will be stored
+    BASE = "/etc/bind/keys"
 
-# Time after which a ZSK is replaced by a new ZSK.
-# Generation of ZSK and activation / deactivation / deletion is managed automatically as long as
-# dnssec_keys_management.py -c is called at least once a day.
-ZSK_VALIDITY = datetime.timedelta(days=30)  # ~1 month
+    # Interval between 2 operations on the dns keys.
+    # For example if you have KEY1 enabled, KEY2 is published INTERVAL before disabling KEY1. KEY1
+    # is disabled when KEY2 is activated, KEY1 is deleted INTERVAL after being disabled.
+    # INTERVAL MUST be greater than the longest TTL DS records can have.
+    # INTERVAL MUST also be higher than the bind signature interval (default 22.5 days)
+    # This partially depents of the parent zone configuration and you do not necessarily have
+    # control over it.
+    INTERVAL = datetime.timedelta(days=23)
 
-# Time after which a new KSK is generated and published for the zone (and activated after INTERVAL).
-# The old key is removed only INTERVAL after the new key was dnssec_keys_management.py --ds-seen.
-# This usually requires a manual operation with the registrar (publish DS of the new key
-# in the parent zone). dnssec_keys_management.py -c displays a message as long as --ds-seen needs
-# to be called and has not yet be called
-KSK_VALIDITY = datetime.timedelta(days=366)  # ~1 an
+    # Time after which a ZSK is replaced by a new ZSK.
+    # Generation of ZSK and activation / deactivation / deletion is managed automatically as long as
+    # dnssec_keys_management.py -c is called at least once a day.
+    ZSK_VALIDITY = datetime.timedelta(days=30)  # ~1 month
 
-# Algorithm used to generate new keys. Only the first created KSK and ZSK of a zone will use
-# this algorithm. Any renewed key will use the exact same parameters (name, algorithm, size,
-# and type) as the renewed key.
-ALGORITHM = "RSASHA256"
+    # Time after which a new KSK is generated and published for the zone (and activated after
+    # INTERVAL). The old key is removed only INTERVAL after the new key was
+    # dnssec_keys_management.py --ds-seen.
+    # This usually requires a manual operation with the registrar (publish DS of the new key
+    # in the parent zone). dnssec_keys_management.py -c displays a message as long as --ds-seen
+    # needs to be called and has not yet be called
+    KSK_VALIDITY = datetime.timedelta(days=366)  # ~1 year
 
-SUPPORTED_ALGORITHMS = {
-    8: "RSASHA256",
-    10: "RSASHA512",
-    12: "ECCGOST",
-    13: "ECDSAP256SHA256",
-    14: "ECDSAP384SHA384",
-}
+    # Algorithm used to generate new keys. Only the first created KSK and ZSK of a zone will use
+    # this algorithm. Any renewed key will use the exact same parameters (name, algorithm, size,
+    # and type) as the renewed key.
+    ALGORITHM = "RSASHA256"
 
-# Size of the created KSK. Only the first created KSK of a zone will use this size.
-# Any renewed key will use the exact same parameters (name, algorithm, size, and type)
-# as the renewed key
-KSK_SIZE = "2048"
+    SUPPORTED_ALGORITHMS = {
+        8: "RSASHA256",
+        10: "RSASHA512",
+        12: "ECCGOST",
+        13: "ECDSAP256SHA256",
+        14: "ECDSAP384SHA384",
+    }
 
-# Size of the created ZSK. Only the first created ZSK of a zone will use this size.
-# Any renewed key will use the exact same parameters (name, algorithm, size, and type)
-# as the renewed key.
-ZSK_SIZE = "1024"
+    # Size of the created KSK. Only the first created KSK of a zone will use this size.
+    # Any renewed key will use the exact same parameters (name, algorithm, size, and type)
+    # as the renewed key
+    KSK_SIZE = "2048"
+
+    # Size of the created ZSK. Only the first created ZSK of a zone will use this size.
+    # Any renewed key will use the exact same parameters (name, algorithm, size, and type)
+    # as the renewed key.
+    ZSK_SIZE = "1024"
+
+    # path to the dnssec-settime binary
+    DNSSEC_SETTIME = "/usr/sbin/dnssec-settime"
+    # path to the dnssec-dsfromkey binary
+    DNSSEC_DSFROMKEY = "/usr/sbin/dnssec-dsfromkey"
+    # path to the dnssec-keygen binary
+    DNSSEC_KEYGEN = "/usr/sbin/dnssec-keygen"
+    # path to the rndc binary
+    RNDC = "/usr/sbin/rndc"
+
+    # Possible config paths. The first path whose exists will be used as configuration
+    config_paths = [
+        os.path.abspath(os.path.join(os.path.dirname(__file__), "config.ini")),
+        os.path.abspath(os.path.join(os.path.dirname(__file__), "dnssec_keys_management.ini")),
+        os.path.abspath(os.path.expanduser("~/.config/dnssec_keys_management.ini")),
+        "/etc/dnssec_keys_management.ini",
+    ]
+
+    def show(self):
+        """Display config."""
+        print("Key base path: %s" % self.BASE)
+        print("Interval between two operation: %s" % self.INTERVAL)
+        print("ZSK validity duration: %s" % self.ZSK_VALIDITY)
+        print("KSK validity duration: %s" % self.KSK_VALIDITY)
+        print("DNSKEY algorithm: %s" % self.ALGORITHM)
+        print("KSK size: %s" % self.KSK_SIZE)
+        print("ZSK size: %s" % self.ZSK_SIZE)
+        print("")
+        print("Path to dnssec-settime: %s" % self.DNSSEC_SETTIME)
+        print("Path to dnssec-dsfromkey: %s" % self.DNSSEC_DSFROMKEY)
+        print("Path to dnssec-keygen: %s" % self.DNSSEC_KEYGEN)
+        print("Path to rdnc: %s" % self. RNDC)
+
+    def __init__(self, path=None):
+        """Parse the config file and update attributes accordingly."""
+        if path is None:
+            for path in self.config_paths:
+                if os.path.isfile(path):
+                    self._parse(path)
+                    break
+        else:
+            self._parse(path)
+        self.check_paths()
+
+    def _parse(self, config_file):
+        config_parser = configparser.ConfigParser()
+        config_parser.read(config_file)
+        self._parse_dnssec_section(config_parser)
+        self._parse_path_section(config_parser)
+
+    def _parse_dnssec_section(self, config_parser):
+        if config_parser.has_section("dnssec"):
+            if config_parser.has_option("dnssec", "base_directory"):
+                self.BASE = config_parser.get("dnssec", "base_directory")
+            if config_parser.has_option("dnssec", "interval"):
+                try:
+                    self.INTERVAL = datetime.timedelta(
+                        days=config_parser.getfloat("dnssec", "interval")
+                    )
+                except ValueError:
+                    print(
+                        "Unable to convert the config parameter 'interval' to a float",
+                        file=sys.stderr
+                    )
+            if config_parser.has_option("dnssec", "zsk_validity"):
+                try:
+                    self.ZSK_VALIDITY = datetime.timedelta(
+                        days=config_parser.getfloat("dnssec", "zsk_validity")
+                    )
+                except ValueError:
+                    print(
+                        "Unable to convert the config parameter 'zsk_validity' to a float",
+                        file=sys.stderr
+                    )
+            if config_parser.has_option("dnssec", "ksk_validity"):
+                try:
+                    self.KSK_VALIDITY = datetime.timedelta(
+                        days=config_parser.getfloat("dnssec", "ksk_validity")
+                    )
+                except ValueError:
+                    print(
+                        "Unable to convert the config parameter 'ksk_validity' to a float",
+                        file=sys.stderr
+                    )
+            if config_parser.has_option("dnssec", "algorithm"):
+                self.ALGORITHM = config_parser.get("dnssec", "algorithm")
+                if self.ALGORITHM not in self.SUPPORTED_ALGORITHMS.values():
+                    raise ValueError(
+                        "Invalid algorithm %s."
+                        "Supported algorithms are %s" % (
+                            self.ALGORITHM, ", ".join(self.SUPPORTED_ALGORITHMS.values())
+                        )
+                    )
+            if config_parser.has_option("dnssec", "zsk_size"):
+                self.ZSK_SIZE = config_parser.get("dnssec", "zsk_size")
+
+            if config_parser.has_option("dnssec", "ksk_size"):
+                self.KSK_SIZE = config_parser.get("dnssec", "ksk_size")
+
+    def _parse_path_section(self, config_parser):
+        if config_parser.has_section("path"):
+            if config_parser.has_option("path", "dnssec_settime"):
+                self.DNSSEC_SETTIME = config_parser.get("path", "dnssec_settime")
+            if config_parser.has_option("path", "dnssec_dsfromkey"):
+                self.DNSSEC_DSFROMKEY = config_parser.get("path", "dnssec_dsfromkey")
+            if config_parser.has_option("path", "dnssec_keygen"):
+                self.DNSSEC_KEYGEN = config_parser.get("path", "dnssec_keygen")
+            if config_parser.has_option("path", "rndc"):
+                self.RNDC = config_parser.get("path", "rndc")
+
+    def check_paths(self):
+        """Check config path to needed binaries."""
+        for path in [self.DNSSEC_SETTIME, self.DNSSEC_DSFROMKEY, self.DNSSEC_KEYGEN, self.RNDC]:
+            if not os.path.isfile(path) or not os.access(path, os.X_OK):
+                raise ValueError(
+                    "%s not found or not executable. Is bind9utils installed ?\n" % path
+                )
 
 
-# path to the dnssec-settime binary
-DNSSEC_SETTIME = "/usr/sbin/dnssec-settime"
-# path to the dnssec-dsfromkey binary
-DNSSEC_DSFROMKEY = "/usr/sbin/dnssec-dsfromkey"
-# path to the dnssec-keygen binary
-DNSSEC_KEYGEN = "/usr/sbin/dnssec-keygen"
-# path to the rndc binary
-RNDC = "/usr/sbin/rndc"
-
-
-def get_zones(zone_names=None):
+def get_zones(config=None, zone_names=None):
     """
     Return a list of :class:`Zone` instances.
 
+    :param Config config: A :class:`Config` instance
     :param list zone_names: If provider return :class:`Zone` instance for the zone provided.
         Otherwise, return :class:`Zone` instance for all founded zones
     """
-    l = []
+    if config is None:
+        config = Config()
+    zones = []
     if zone_names is None:
-        for f in os.listdir(BASE):
-            if os.path.isdir(os.path.join(BASE, f)) and not f.startswith('.'):
-                l.append(Zone(f))
+        for f in os.listdir(config.BASE):
+            if os.path.isdir(os.path.join(config.BASE, f)) and not f.startswith('.'):
+                zones.append(Zone(f, config=config))
     else:
         for name in zone_names:
-            l.append(Zone(name))
-    return l
+            zones.append(Zone(name, config=config))
+    return zones
 
 
 def bind_chown(path):
@@ -113,9 +227,11 @@ def bind_chown(path):
         print("User bind not found, failing to give keys ownership to bind", file=sys.stderr)
 
 
-def bind_reload():
+def bind_reload(config=None):
     """Reload bind config."""
-    cmd = [RNDC, "reload"]
+    if config is None:
+        config = Config()
+    cmd = [config.RNDC, "reload"]
     p = subprocess.Popen(cmd)
     p.wait()
 
@@ -125,8 +241,9 @@ class Zone(object):
 
     ZSK = None
     KSK = None
-    _path = None
     name = None
+    _path = None
+    _cfg = None
 
     def __str__(self):
         """Zone name."""
@@ -137,20 +254,22 @@ class Zone(object):
         return "Zone %s" % self.name
 
     @classmethod
-    def create(cls, name):
+    def create(cls, name, config=None):
         """Create the zone keys storage directory and return a :class:`Zone` instance."""
-        path = os.path.join(BASE, name)
+        if config is None:
+            config = Config()
+        path = os.path.join(config.BASE, name)
         if os.path.isdir(path):
             raise ValueError("%s existe" % path)
         os.mkdir(path)
         bind_chown(path)
-        return cls(name)
+        return cls(name, config=config)
 
     def nsec3(self, salt=None):
         """Enable NSEC3 for the zone ``zone``."""
         if salt is None:
             salt = binascii.hexlify(os.urandom(24)).decode()
-        cmd = [RNDC, "signing", "-nsec3param", "1", "0", "10", salt, self.name]
+        cmd = [self._cfg.RNDC, "signing", "-nsec3param", "1", "0", "10", salt, self.name]
         print("Enabling nsec3 for zone %s: " % self.name, file=sys.stdout)
         p = subprocess.Popen(cmd, stdout=subprocess.PIPE)
         out = p.communicate()[0].decode()
@@ -161,15 +280,16 @@ class Zone(object):
         """Perform daily routine on ZSK keys (generate new keys, delete old ones...)."""
         for zsk in self.ZSK:
             if zsk.is_activate and not zsk.is_inactive:
-                zsk.inactive = zsk.activate + ZSK_VALIDITY
-                zsk.delete = zsk.inactive + INTERVAL
+                zsk.inactive = zsk.activate + self._cfg.ZSK_VALIDITY
+                zsk.delete = zsk.inactive + self._cfg.INTERVAL
                 last_activate_zsk = zsk
         now = datetime.datetime.utcnow()
+        zsk = self.ZSK[-1]
         if zsk.is_activate:
-            zsk.inactive = max(zsk.inactive, now + INTERVAL)
-            zsk.delete = zsk.inactive + INTERVAL
+            zsk.inactive = max(zsk.inactive, now + self._cfg.INTERVAL)
+            zsk.delete = zsk.inactive + self._cfg.INTERVAL
             zsk.gen_successor()
-            bind_reload()
+            bind_reload(self._cfg)
         else:
             zsk.activate = last_activate_zsk.inactive
 
@@ -178,11 +298,11 @@ class Zone(object):
         ksk = self.KSK[-1]
         if ksk.need_renew:
             now = datetime.datetime.utcnow()
-            new_ksk = Key.create("KSK", self.name)
+            new_ksk = Key.create("KSK", self.name, config=self._cfg)
             # do not activate the new key until ds-seen
             new_ksk.activate = None
             new_ksk.publish = now
-            bind_reload()
+            bind_reload(self._cfg)
         active_ksk = [key for key in self.KSK if key.is_publish and key.delete is None]
         if len(active_ksk) >= 2:
             print(
@@ -236,9 +356,9 @@ class Zone(object):
                 print(" * %s (%s)" % (ns, ', '.join(ns_ips)))
                 for ip in ns_ips:
                     keyids &= founds[(ns, ip)]
-            keyids = list(keyids)
-            keyids.sort()
-            print("Found keys are %s" % ', '.join(str(id_) for id_ in keyids))
+            keyids_list = list(keyids)
+            keyids_list.sort()
+            print("Found keys are %s" % ', '.join(str(id_) for id_ in keyids_list))
         else:
             print("DS for key %s found on all parent servers" % keyid)
         return ok
@@ -261,14 +381,14 @@ class Zone(object):
                 return
         now = datetime.datetime.utcnow()
         if seen_ksk.activate is None:
-            seen_ksk.activate = (now + INTERVAL)
+            seen_ksk.activate = (now + self._cfg.INTERVAL)
         for ksk in old_ksks:
             print(" * program key %s removal" % ksk.keyid)
             # set inactive in at least INTERVAL
             ksk.inactive = seen_ksk.activate
             # delete INTERVAL after being inactive
-            ksk.delete = ksk.inactive + INTERVAL
-        bind_reload()
+            ksk.delete = ksk.inactive + self._cfg.INTERVAL
+        bind_reload(self._cfg)
 
     def remove_deleted(self):
         """Move deleted keys to the deleted folder."""
@@ -280,18 +400,12 @@ class Zone(object):
                 raise
         now = datetime.datetime.utcnow()
         for key in self.ZSK + self.KSK:
-            if key.delete and (key.delete + INTERVAL) <= now:
-                for path in [key._path, key._path_private]:
-                    basename = os.path.basename(path)
-                    new_path = os.path.join(deleted_path, basename)
-                    os.rename(path, new_path)
+            key.remove_deleted(deleted_path, now=now)
 
     def ds(self):
         """Display the DS of the KSK of the zone."""
         for ksk in self.KSK:
-            cmd = [DNSSEC_DSFROMKEY, ksk._path]
-            p = subprocess.Popen(cmd)
-            p.wait()
+            ksk.ds()
 
     def key(self, show_ksk=False, show_zsk=False):
         """Display the public keys of the KSK and/or ZSK."""
@@ -323,7 +437,7 @@ class Zone(object):
         print(separator)
 
     def _key_table_body(self, znl, show_all=False):
-        (format_string, separator) = self._key_table_format(znl, show_all)
+        format_string = self._key_table_format(znl, show_all)[0]
         for ksk in self.KSK:
             print(format_string.format(
                 ksk.zone_name,
@@ -351,30 +465,36 @@ class Zone(object):
 
     @classmethod
     def _key_table_footer(cls, znl, show_all=False):
-        (format_string, separator) = cls._key_table_format(znl, show_all)
+        separator = cls._key_table_format(znl, show_all)[1]
         print(separator)
 
-    def key_table(self, show_all=False):
+    @classmethod
+    def key_table(cls, zones, show_all=False):
         """Show meta data for the zone keys in a table."""
-        znl = max(len(self.name), 9)
-        self._key_table_header(znl, show_all)
-        self._key_table_body(znl, show_all)
-        self._key_table_footer(znl, show_all)
+        znl = max(9, *[len(zone.name) for zone in zones])
+        cls._key_table_header(znl, show_all)
+        for zone in zones:
+            zone._key_table_body(znl, show_all)  # pylint: disable=locally-disabled,protected-access
+        cls._key_table_footer(znl, show_all)
 
-    def __init__(self, name):
+    def __init__(self, name, config=None):
         """Read every keys attached to the zone. If not keys is found, generate new ones."""
-        path = os.path.join(BASE, name)
+        if config is None:
+            self._cfg = Config()
+        else:
+            self._cfg = config
+        path = os.path.join(self._cfg.BASE, name)
         if not os.path.isdir(path):
             raise ValueError("%s is not a directory" % path)
         self.name = name
         self._path = path
         self.ZSK = []
         self.KSK = []
-        for file in os.listdir(path):
-            file_path = os.path.join(path, file)
+        for file_ in os.listdir(path):
+            file_path = os.path.join(path, file_)
             if os.path.isfile(file_path) and file_path.endswith(".private"):
                 try:
-                    key = Key(file_path)
+                    key = Key(file_path, config=self._cfg)
                     if key.type == "ZSK":
                         self.ZSK.append(key)
                     elif key.type == "KSK":
@@ -386,10 +506,10 @@ class Zone(object):
         self.ZSK.sort()
         self.KSK.sort()
         if not self.ZSK:
-            self.ZSK.append(Key.create("ZSK", name))
+            self.ZSK.append(Key.create("ZSK", name, config=self._cfg))
             self.do_zsk()
         if not self.KSK:
-            self.KSK.append(Key.create("KSK", name))
+            self.KSK.append(Key.create("KSK", name, config=self._cfg))
             self.do_ksk()
 
 
@@ -397,6 +517,7 @@ class Zone(object):
 class Key(object):
     """Allow to manage a specific dnssec key."""
 
+    # pylint: disable=locally-disabled,too-many-instance-attributes
     _created = None
     _publish = None
     _activate = None
@@ -404,6 +525,7 @@ class Key(object):
     _delete = None
     _data = None
     _path = None
+    _cfg = None
     type = None
     keyid = None
     flag = None
@@ -419,11 +541,13 @@ class Key(object):
         r = os.path.basename(self._path)
         return r
 
-    def _date_from_key(self, date):
+    @staticmethod
+    def _date_from_key(date):
         if date is not None:
             return datetime.datetime.strptime(date, "%Y%m%d%H%M%S")
 
-    def _date_to_key(self, date):
+    @staticmethod
+    def _date_to_key(date):
         if date is None:
             return 'none'
         else:
@@ -455,7 +579,7 @@ class Key(object):
                 raise RuntimeError(msg)
 
     @classmethod
-    def create(cls, typ, name, options=None):
+    def create(cls, typ, name, options=None, config=None):
         """
         Create a new dnssc key.
 
@@ -463,14 +587,16 @@ class Key(object):
         :param str name: The zone name for which we are creating the key.
         :param list options: An optional list of extra parameters to pass to DNSSEC_KEYGEN binary.
         """
+        if config is None:
+            config = Config()
         if options is None:
             options = []
-        path = os.path.join(BASE, name)
-        cmd = [DNSSEC_KEYGEN, "-a", ALGORITHM]
+        path = os.path.join(config.BASE, name)
+        cmd = [config.DNSSEC_KEYGEN, "-a", config.ALGORITHM]
         if typ == "KSK":
-            cmd.extend(["-b", KSK_SIZE, "-f", "KSK"])
+            cmd.extend(["-b", config.KSK_SIZE, "-f", "KSK"])
         elif typ == "ZSK":
-            cmd.extend(["-b", ZSK_SIZE])
+            cmd.extend(["-b", config.ZSK_SIZE])
         else:
             raise ValueError("typ must be KSK or ZSK")
         cmd.extend(options)
@@ -481,7 +607,7 @@ class Key(object):
             raise ValueError("The key creation has failed")
         keyname = p.communicate()[0].strip().decode()
         bind_chown(path)
-        return cls(os.path.join(path, "%s.private" % keyname))
+        return cls(os.path.join(path, "%s.private" % keyname), config=config)
 
     def gen_successor(self):
         """
@@ -492,7 +618,7 @@ class Key(object):
         The publication date will be set to the activation date minus the prepublication interval.
         """
         cmd = [
-            DNSSEC_KEYGEN, "-i", str(int(INTERVAL.total_seconds())),
+            self._cfg.DNSSEC_KEYGEN, "-i", str(int(self._cfg.INTERVAL.total_seconds())),
             "-S", self._path, "-K", os.path.dirname(self._path)
         ]
         p = subprocess.Popen(cmd, stderr=subprocess.PIPE)
@@ -506,8 +632,8 @@ class Key(object):
     def settime(self, flag, date):
         """Set the time of the flag ``flag`` for the key to ``date``."""
         cmd = [
-            DNSSEC_SETTIME,
-            "-i", str(int(INTERVAL.total_seconds())),
+            self._cfg.DNSSEC_SETTIME,
+            "-i", str(int(self._cfg.INTERVAL.total_seconds())),
             "-%s" % flag, date, self._path
         ]
         p = subprocess.Popen(cmd, stderr=subprocess.PIPE, stdout=subprocess.PIPE)
@@ -616,18 +742,44 @@ class Key(object):
         if self.type == "KSK":
             return (
                 self.activate is not None and
-                (self.activate + KSK_VALIDITY) <= (datetime.datetime.utcnow() + INTERVAL)
+                (
+                    (self.activate + self._cfg.KSK_VALIDITY) <=
+                    (datetime.datetime.utcnow() + self._cfg.INTERVAL)
+                )
             )
         elif self.type == "ZSK":
             return (
-                self.activate is not None
-                and (self.activate + ZSK_VALIDITY) <= (datetime.datetime.utcnow() + INTERVAL)
+                self.activate is not None and
+                (
+                    (self.activate + self._cfg.ZSK_VALIDITY) <=
+                    (datetime.datetime.utcnow() + self._cfg.INTERVAL)
+                )
             )
         else:
             raise RuntimeError("impossible")
 
-    def __init__(self, path):
+    def ds(self):
+        """Display the DS of the key."""
+        cmd = [self._cfg.DNSSEC_DSFROMKEY, self._path]
+        p = subprocess.Popen(cmd)
+        p.wait()
+
+    def remove_deleted(self, deleted_path, now=None):
+        """Move deleted keys to the deleted folder."""
+        if now is None:
+            now = datetime.datetime.utcnow()
+        if self.delete and (self.delete + self._cfg.INTERVAL) <= now:
+            for path in [self._path, self._path_private]:
+                basename = os.path.basename(path)
+                new_path = os.path.join(deleted_path, basename)
+                os.rename(path, new_path)
+
+    def __init__(self, path, config=None):
         """Parse the dnssec key file ``path``."""
+        if config is None:
+            self._cfg = Config()
+        else:
+            self._cfg = config
         if not path.endswith(".private"):
             raise ValueError("%s is not a valid private key (should ends with .private)" % path)
         if not os.path.isfile(path):
@@ -635,32 +787,11 @@ class Key(object):
         ppath = "%s.key" % path[:-8]
         if not os.path.isfile(ppath):
             raise ValueError("The public key (%s) of %s does not exist" % (ppath, path))
-        with open(ppath, 'r') as f:
-            self._data = f.read()
-        with open(path, 'r') as f:
-            private_data = f.read()
-        for line in self._data.split("\n"):
-            if line.startswith(";") or not line:
-                continue
-            line = line.split(";", 1)[0].strip()
-            line = line.split()
-            if len(line) < 7:
-                raise ValueError(
-                    "The public key %s should have at least 7 fields: %r" % (ppath, line)
-                )
-            if not line[0].endswith('.'):
-                raise ValueError(
-                    (
-                        "The public key %s should begin with the zone fqdn (ending with a .)"
-                    ) % ppath
-                )
-            self.zone_name = line[0][:-1]
-            try:
-                self.flag = int(line[3])
-            except ValueError:
-                raise ValueError(
-                    "The flag %s of the public key %s should be an integer" % (line[3], ppath)
-                )
+        self._path = ppath
+        self._path_private = path
+        self._parse_public_key()
+        self._parse_private_key()
+
         if self.flag == 256:
             self.type = "ZSK"
         elif self.flag == 257:
@@ -672,13 +803,43 @@ class Key(object):
                     self.flag
                 )
             )
-        self._path = ppath
-        self._path_private = path
-        keyid = path.split('.')[-2].split('+')[-1]
+
+    def _parse_public_key(self):
+        with open(self._path, 'r') as f:
+            self._data = f.read()
+        for line in self._data.split("\n"):
+            if line.startswith(";") or not line:
+                continue
+            line = line.split(";", 1)[0].strip()
+            line = line.split()
+            if len(line) < 7:
+                raise ValueError(
+                    "The public key %s should have at least 7 fields: %r" % (self._path, line)
+                )
+            if not line[0].endswith('.'):
+                raise ValueError(
+                    (
+                        "The public key %s should begin with the zone fqdn (ending with a .)"
+                    ) % self._path
+                )
+            self.zone_name = line[0][:-1]
+            try:
+                self.flag = int(line[3])
+            except ValueError:
+                raise ValueError(
+                    "The flag %s of the public key %s should be an integer" % (line[3], self._path)
+                )
+
+    def _parse_private_key(self):
+        keyid = self._path_private.split('.')[-2].split('+')[-1]
         try:
             self.keyid = int(keyid)
         except ValueError:
-            raise ValueError("The keyid %s of the key %s should be an integer" % (keyid, path))
+            raise ValueError(
+                "The keyid %s of the key %s should be an integer" % (keyid, self._path_private)
+            )
+        with open(self._path_private, 'r') as f:
+            private_data = f.read()
         for line in private_data.split("\n"):
             if line.startswith("Created:"):
                 self._created = line[8:].strip()
@@ -697,9 +858,14 @@ class Key(object):
                 self._date_from_key(self._delete)
             elif line.startswith("Algorithm:"):
                 algorithm = int(line[11:13].strip())
-                self.algorithm = SUPPORTED_ALGORITHMS.get(algorithm, "Unknown (%d)" % algorithm)
+                self.algorithm = self._cfg.SUPPORTED_ALGORITHMS.get(
+                    algorithm,
+                    "Unknown (%d)" % algorithm
+                )
         if self.created is None:
-            raise ValueError("The key %s must have as list its Created field defined" % path)
+            raise ValueError(
+                "The key %s must have as list its Created field defined" % self._path_private
+            )
 
     def __lt__(self, y):
         """
@@ -724,192 +890,134 @@ class Key(object):
 
         Two key instances are equals if they point to the same key file.
         """
+        # pylint: disable=locally-disabled,protected-access
         return isinstance(y, Key) and y._path == self._path
 
 
-if __name__ == '__main__':
-    config_parser = configparser.ConfigParser()
-    config_file = os.path.abspath(os.path.join(os.path.dirname(__file__), 'config.ini'))
+def parse_arguments():
+    """Parse command ligne arguments."""
+    parser = argparse.ArgumentParser()
+    parser.add_argument('zone', nargs='*', help='A dns zone name.')
+    parser.add_argument(
+        '--config',
+        help=(
+            "Path to a config file. If not specified, the first file found "
+            "among %s will be used." % ", ".join(Config.config_paths)
+        )
+    )
+    parser.add_argument(
+        '--make', '-m',
+        action='store_true',
+        help='Create initials keys for each supplied zone'
+    )
+    parser.add_argument(
+        '--cron', '-c',
+        action='store_true',
+        help='Perform maintenance for each supplied zone or for all zones if no zone supplied'
+    )
+    parser.add_argument(
+        '--ds',
+        action='store_true',
+        help='Show KSK DS for each supplied zone or for all zones if no zone supplied'
+    )
+    parser.add_argument(
+        '--key',
+        nargs='?', const="all", type=str, choices=["all", "ksk", "zsk"],
+        help='Show DNSKEY for each zone supplied zone or for all zones if no zone supplied'
+    )
+    parser.add_argument(
+        '--key-table',
+        nargs='?', const="default", type=str, choices=["default", "all_fields"],
+        help='Show a table with all non deleted DNSKEY meaningful dates'
+    )
+    parser.add_argument(
+        '--ds-seen',
+        metavar='KEYID',
+        type=int,
+        help=(
+            'To call with the ID of a new KSK published in the parent zone. '
+            'Programs old KSK removal. '
+            'If will check that the KSK key id appear in one DS of each servers of the parent '
+            'zone, except if called with --no-check.'
+        )
+    )
+    parser.add_argument(
+        '--no-check',
+        action='store_true',
+        help='Allow to bypass DS check from parent zone in --ds-seen'
+    )
+    parser.add_argument(
+        '--ds-check',
+        metavar='KEYID',
+        type=int,
+        help=(
+            'To call with the ID of a KSK published in the parent zone. '
+            'Check that the KSK key id appear in one DS of each servers of the parent zone. '
+            'Note that this just check for key id, it not not check that the DS digest mach '
+            'the KSK. '
+        )
+    )
+    parser.add_argument(
+        '--nsec3',
+        action='store_true',
+        help='Enable NSEC3 for the zones, using a random salt'
+    )
+    parser.add_argument(
+        '--show-config',
+        action='store_true',
+        help='Show the current configuration'
+    )
+    return parser
 
-    if os.path.isfile(config_file):
-        config_parser.read(config_file)
-        if config_parser.has_section("dnssec"):
-            if config_parser.has_option("dnssec", "base_directory"):
-                BASE = config_parser.get("dnssec", "base_directory")
-            if config_parser.has_option("dnssec", "interval"):
-                try:
-                    INTERVAL = datetime.timedelta(days=config_parser.getfloat("dnssec", "interval"))
-                except ValueError:
-                    print(
-                        "Unable to convert the config parameter 'interval' to a float",
-                        file=sys.stderr
-                    )
-            if config_parser.has_option("dnssec", "zsk_validity"):
-                try:
-                    ZSK_VALIDITY = datetime.timedelta(
-                        days=config_parser.getfloat("dnssec", "zsk_validity")
-                    )
-                except ValueError:
-                    print(
-                        "Unable to convert the config parameter 'zsk_validity' to a float",
-                        file=sys.stderr
-                    )
-            if config_parser.has_option("dnssec", "ksk_validity"):
-                try:
-                    KSK_VALIDITY = datetime.timedelta(
-                        days=config_parser.getfloat("dnssec", "ksk_validity")
-                    )
-                except ValueError:
-                    print(
-                        "Unable to convert the config parameter 'ksk_validity' to a float",
-                        file=sys.stderr
-                    )
-            if config_parser.has_option("dnssec", "algorithm"):
-                ALGORITHM = config_parser.get("dnssec", "algorithm")
-                if ALGORITHM not in SUPPORTED_ALGORITHMS.values():
-                    raise ValueError(
-                        "Invalid algorithm %s."
-                        "Supported algorithms are %s" % (ALGORITHM, ", ".join(SUPPORTED_ALGORITHMS))
-                    )
 
-            if config_parser.has_option("dnssec", "zsk_size"):
-                ZSK_SIZE = config_parser.get("dnssec", "zsk_size")
-
-            if config_parser.has_option("dnssec", "ksk_size"):
-                KSK_SIZE = config_parser.get("dnssec", "ksk_size")
-
-        if config_parser.has_section("path"):
-            if config_parser.has_option("path", "dnssec_settime"):
-                DNSSEC_SETTIME = config_parser.get("path", "dnssec_settime")
-            if config_parser.has_option("path", "dnssec_dsfromkey"):
-                DNSSEC_DSFROMKEY = config_parser.get("path", "dnssec_dsfromkey")
-            if config_parser.has_option("path", "dnssec_keygen"):
-                DNSSEC_KEYGEN = config_parser.get("path", "dnssec_keygen")
-            if config_parser.has_option("path", "rndc"):
-                RNDC = config_parser.get("path", "rndc")
-
-    for path in [DNSSEC_SETTIME, DNSSEC_DSFROMKEY, DNSSEC_KEYGEN, RNDC]:
-        if not os.path.isfile(path) or not os.access(path, os.X_OK):
-            sys.exit("%s not found or not executable. Is bind9utils installed ?\n" % path)
-
-    try:
-        parser = argparse.ArgumentParser()
-        parser.add_argument('zone', nargs='*', help='zone name')
-        parser.add_argument(
-            '--make', '-m',
-            action='store_true',
-            help='Create keys for each supplied zone'
-        )
-        parser.add_argument(
-            '--cron', '-c',
-            action='store_true',
-            help='Perform maintenance for each supplied zone or for all zones if no zone supplied'
-        )
-        parser.add_argument(
-            '--ds',
-            action='store_true',
-            help='Show KSK DS for each supplied zone or for all zones if no zone supplied'
-        )
-        parser.add_argument(
-            '--key',
-            nargs='?', const="all", type=str, choices=["all", "ksk", "zsk"],
-            help='Show DNSKEY for each zone supplied zone or for all zones if no zone supplied'
-        )
-        parser.add_argument(
-            '--key-table',
-            nargs='?', const="default", type=str, choices=["default", "all_fields"],
-            help='Show a table with all non deleted DNSKEY meaningful dates'
-        )
-        parser.add_argument(
-            '--ds-seen',
-            metavar='KEYID',
-            type=int,
-            help=(
-                'To call with the ID of a new KSK published in the parent zone. '
-                'Programs old KSK removal. '
-                'If will check that the KSK key id appear in one DS of each servers of the parent '
-                'zone, except if called with --no-check.'
-            )
-        )
-        parser.add_argument(
-            '--no-check',
-            action='store_true',
-            help='Allow to bypass DS check from parent zone in --ds-seen'
-        )
-        parser.add_argument(
-            '--ds-check',
-            metavar='KEYID',
-            type=int,
-            help=(
-                'To call with the ID of a KSK published in the parent zone. '
-                'Check that the KSK key id appear in one DS of each servers of the parent zone. '
-                'Note that this just check for key id, it not not check that the DS digest mach '
-                'the KSK. '
-            )
-        )
-        parser.add_argument(
-            '--nsec3',
-            action='store_true',
-            help='Enable NSEC3 for the zones, using a random salt'
-        )
-        parser.add_argument(
-            '--show-config',
-            action='store_true',
-            help='Show the current configuration'
-        )
-
-        args = parser.parse_args()
-        zones = args.zone
-        if args.show_config:
-            print("Key base path: %s" % BASE)
-            print("Interval between two operation: %s" % INTERVAL)
-            print("ZSK validity duration: %s" % ZSK_VALIDITY)
-            print("KSK validity duration: %s" % KSK_VALIDITY)
-            print("DNSKEY algorithm: %s" % ALGORITHM)
-            print("")
-            print("Path to dnssec-settime: %s" % DNSSEC_SETTIME)
-            print("Path to dnssec-dsfromkey: %s" % DNSSEC_DSFROMKEY)
-            print("Path to dnssec-keygen: %s" % DNSSEC_KEYGEN)
-            print("Path to rdnc: %s" % RNDC)
-        if args.make:
-            for zone in zones:
-                Zone.create(zone)
-        zones = get_zones(zones if zones else None)
-        if args.nsec3:
-            for zone in zones:
-                zone.nsec3()
-        if args.ds_seen:
-            if len(zones) != 1:
-                sys.exit("Please specify exactly ONE zone name\n")
-            for zone in zones:
-                zone.ds_seen(args.ds_seen, check=not args.no_check)
-        if args.ds_check:
-            if len(zones) != 1:
-                sys.exit("Please specify exactly ONE zone name\n")
-            for zone in zones:
-                zone.ds_check(args.ds_check)
-        if args.cron:
-            for zone in zones:
-                zone.do_zsk()
-                zone.do_ksk()
-                zone.remove_deleted()
-        if args.ds:
-            for zone in zones:
-                zone.ds()
-        if args.key:
-            for zone in zones:
-                zone.key(show_ksk=args.key in ["all", "ksk"], show_zsk=args.key in ["all", "zsk"])
-        if args.key_table:
-            znl = max(len(zone.name) for zone in zones)
-            znl = max(znl, 9)
-            Zone._key_table_header(znl, args.key_table == "all_fields")
-            for zone in zones:
-                zone._key_table_body(znl, args.key_table == "all_fields")
-            Zone._key_table_footer(znl, args.key_table == "all_fields")
-        if not any([
+def main():  # pylint: disable=locally-disabled,too-many-branches
+    """Run functions based on command ligne arguments."""
+    parser = parse_arguments()
+    args = parser.parse_args()
+    config = Config()
+    zones = args.zone
+    if args.show_config:
+        config.show()
+    if args.make:
+        for zone in zones:
+            Zone.create(zone, config=config)
+    zones = get_zones(zones if zones else None)
+    if args.nsec3:
+        for zone in zones:
+            zone.nsec3()
+    if args.ds_check:
+        if len(zones) != 1:
+            sys.exit("Please specify exactly ONE zone name\n")
+        for zone in zones:
+            zone.ds_check(args.ds_check)
+    if args.ds_seen:
+        if len(zones) != 1:
+            sys.exit("Please specify exactly ONE zone name\n")
+        for zone in zones:
+            zone.ds_seen(args.ds_seen, check=not args.no_check)
+    if args.cron:
+        for zone in zones:
+            zone.do_zsk()
+            zone.do_ksk()
+            zone.remove_deleted()
+    if args.ds:
+        for zone in zones:
+            zone.ds()
+    if args.key:
+        for zone in zones:
+            zone.key(show_ksk=args.key in ["all", "ksk"],
+                     show_zsk=args.key in ["all", "zsk"])
+    if args.key_table:
+        Zone.key_table(zones, args.key_table == "all_fields")
+    if not any([
             args.make, args.cron, args.ds, args.key, args.ds_seen, args.nsec3,
             args.show_config, args.key_table, args.ds_check
-        ]):
-            parser.print_help()
+    ]):
+        parser.print_help()
+
+
+if __name__ == '__main__':
+    try:
+        main()
     except (ValueError, IOError) as error:
         sys.exit("%s\n" % error)
