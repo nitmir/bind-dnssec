@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf8 -*-
+"""The script allow to manage bind dnssec keys (generate new keys and handle key rollover)."""
 
 from __future__ import print_function, unicode_literals
 
@@ -41,7 +42,9 @@ ZSK_VALIDITY = datetime.timedelta(days=30)  # ~1 month
 # to be called and has not yet be called
 KSK_VALIDITY = datetime.timedelta(days=366)  # ~1 an
 
-# Algorithm used to generate new keys.
+# Algorithm used to generate new keys. Only the first created KSK and ZSK of a zone will use
+# this algorithm. Any renewed key will use the exact same parameters (name, algorithm, size,
+# and type) as the renewed key.
 ALGORITHM = "RSASHA256"
 
 SUPPORTED_ALGORITHMS = {
@@ -52,14 +55,34 @@ SUPPORTED_ALGORITHMS = {
     14: "ECDSAP384SHA384",
 }
 
+# Size of the created KSK. Only the first created KSK of a zone will use this size.
+# Any renewed key will use the exact same parameters (name, algorithm, size, and type)
+# as the renewed key
+KSK_SIZE = "2048"
 
+# Size of the created ZSK. Only the first created ZSK of a zone will use this size.
+# Any renewed key will use the exact same parameters (name, algorithm, size, and type)
+# as the renewed key.
+ZSK_SIZE = "1024"
+
+
+# path to the dnssec-settime binary
 DNSSEC_SETTIME = "/usr/sbin/dnssec-settime"
+# path to the dnssec-dsfromkey binary
 DNSSEC_DSFROMKEY = "/usr/sbin/dnssec-dsfromkey"
+# path to the dnssec-keygen binary
 DNSSEC_KEYGEN = "/usr/sbin/dnssec-keygen"
+# path to the rndc binary
 RNDC = "/usr/sbin/rndc"
 
 
 def get_zones(zone_names=None):
+    """
+    Return a list of :class:`Zone` instances.
+
+    :param list zone_names: If provider return :class:`Zone` instance for the zone provided.
+        Otherwise, return :class:`Zone` instance for all founded zones
+    """
     l = []
     if zone_names is None:
         for f in os.listdir(BASE):
@@ -87,9 +110,7 @@ def settime(path, flag, date):
 
 
 def bind_chown(path):
-    """
-        Gives the files to the bind user and sets the modes in a relevant way.
-    """
+    """Give the files to the bind user and sets the modes in a relevant way."""
     try:
         bind_uid = pwd.getpwnam('bind').pw_uid
         os.chown(path, bind_uid, -1)
@@ -103,39 +124,31 @@ def bind_chown(path):
 
 
 def bind_reload():
-    """Reload bind config"""
+    """Reload bind config."""
     cmd = [RNDC, "reload"]
     p = subprocess.Popen(cmd)
     p.wait()
 
 
-def nsec3(zone, salt="-"):
-    """Enable NSEC3 for the zone ``zone``"""
-    cmd = [RNDC, "signing", "-nsec3param", "1", "0", "10", salt, zone]
-    print("Enabling nsec3 for zone %s: " % zone, file=sys.stdout)
-    p = subprocess.Popen(cmd, stdout=subprocess.PIPE)
-    out = p.communicate()[0].decode()
-    print(out, file=sys.stdout)
-    p.wait()
-
-
 class Zone(object):
+    """Allow to manage dnssec keys for a dns zone."""
+
     ZSK = None
     KSK = None
     _path = None
     name = None
 
     def __str__(self):
+        """Zone name."""
         return self.name
 
-    def __unicode__(self):
-        return self.name.decode("utf-8")
-
     def __repr__(self):
+        """Zone representation."""
         return "Zone %s" % self.name
 
     @classmethod
     def create(cls, name):
+        """Create the zone keys storage directory and return a :class:`Zone` instance."""
         path = os.path.join(BASE, name)
         if os.path.isdir(path):
             raise ValueError("%s existe" % path)
@@ -144,7 +157,7 @@ class Zone(object):
         return cls(name)
 
     def do_zsk(self):
-        """Perform daily routine on ZSK keys (generate new keys, delete old ones...)"""
+        """Perform daily routine on ZSK keys (generate new keys, delete old ones...)."""
         for zsk in self.ZSK:
             if zsk.is_activate and not zsk.is_inactive:
                 zsk.inactive = zsk.activate + ZSK_VALIDITY
@@ -160,7 +173,7 @@ class Zone(object):
             zsk.activate = last_activate_zsk.inactive
 
     def do_ksk(self):
-        """Perform daily routine on KSK keys (generate new keys...)"""
+        """Perform daily routine on KSK keys (generate new keys...)."""
         ksk = self.KSK[-1]
         if ksk.need_renew:
             now = datetime.datetime.utcnow()
@@ -206,7 +219,7 @@ class Zone(object):
         bind_reload()
 
     def remove_deleted(self):
-        """Move deleted keys to the deleted folder"""
+        """Move deleted keys to the deleted folder."""
         deleted_path = os.path.join(self._path, "deleted")
         try:
             os.mkdir(deleted_path)
@@ -222,14 +235,14 @@ class Zone(object):
                     os.rename(path, new_path)
 
     def ds(self):
-        """Display the DS of the KSK of the zone"""
+        """Display the DS of the KSK of the zone."""
         for ksk in self.KSK:
             cmd = [DNSSEC_DSFROMKEY, ksk._path]
             p = subprocess.Popen(cmd)
             p.wait()
 
     def key(self, show_ksk=False, show_zsk=False):
-        """Displays the public keys of the KSK and/or ZSK"""
+        """Display the public keys of the KSK and/or ZSK."""
         if show_ksk:
             for ksk in self.KSK:
                 print(ksk)
@@ -290,13 +303,14 @@ class Zone(object):
         print(separator)
 
     def key_table(self, show_all=False):
-        """Show meta data for the zone keys in a table"""
+        """Show meta data for the zone keys in a table."""
         znl = max(len(self.name), 9)
         self._key_table_header(znl, show_all)
         self._key_table_body(znl, show_all)
         self._key_table_footer(znl, show_all)
 
     def __init__(self, name):
+        """Read every keys attached to the zone. If not keys is found, generate new ones."""
         path = os.path.join(BASE, name)
         if not os.path.isdir(path):
             raise ValueError("%s is not a directory" % path)
@@ -329,6 +343,8 @@ class Zone(object):
 
 @total_ordering
 class Key(object):
+    """Allow to manage a specific dnssec key."""
+
     _created = None
     _publish = None
     _activate = None
@@ -343,9 +359,11 @@ class Key(object):
     algorithm = None
 
     def __str__(self):
+        """Verbatim content of the key file."""
         return self._data
 
     def __repr__(self):
+        """Path to the key file."""
         r = os.path.basename(self._path)
         return r
 
@@ -386,6 +404,13 @@ class Key(object):
 
     @classmethod
     def create(cls, typ, name, options=None):
+        """
+        Create a new dnssc key.
+
+        :param str typ: The type of the key to create. Most be 'KSK' or 'ZSK'.
+        :param str name: The zone name for which we are creating the key.
+        :param list options: An optional list of extra parameters to pass to DNSSEC_KEYGEN binary.
+        """
         if options is None:
             options = []
         path = os.path.join(BASE, name)
@@ -407,6 +432,13 @@ class Key(object):
         return cls(os.path.join(path, "%s.private" % keyname))
 
     def gen_successor(self):
+        """
+        Create a new key which is an explicit successor to the current key.
+
+        The name, algorithm, size, and type of the key will be set to match the existing key.
+        The activation date of the new key will be set to the inactivation date of the existing one.
+        The publication date will be set to the activation date minus the prepublication interval.
+        """
         cmd = [
             DNSSEC_KEYGEN, "-i", str(int(INTERVAL.total_seconds())),
             "-S", self._path, "-K", os.path.dirname(self._path)
@@ -421,11 +453,13 @@ class Key(object):
 
     @property
     def created(self):
+        """Date of creation of the key."""
         if self._created is not None:
             return self._date_from_key(self._created)
 
     @property
     def publish(self):
+        """Date of publication of the key."""
         if self._publish is not None:
             return self._date_from_key(self._publish)
 
@@ -442,6 +476,7 @@ class Key(object):
 
     @property
     def activate(self):
+        """Date of activation of the key."""
         if self._activate is not None:
             return self._date_from_key(self._activate)
 
@@ -458,6 +493,7 @@ class Key(object):
 
     @property
     def inactive(self):
+        """Date of inactivation of the key."""
         if self._inactive is not None:
             return self._date_from_key(self._inactive)
 
@@ -474,6 +510,7 @@ class Key(object):
 
     @property
     def delete(self):
+        """Date of deletion of the key."""
         if self._delete:
             return self._date_from_key(self._delete)
 
@@ -489,22 +526,27 @@ class Key(object):
 
     @property
     def is_publish(self):
+        """``True``if the key is published."""
         return self.publish is not None and self.publish <= datetime.datetime.utcnow()
 
     @property
     def is_activate(self):
+        """``True``if the key is activated."""
         return self.activate is not None and self.activate <= datetime.datetime.utcnow()
 
     @property
     def is_inactive(self):
+        """``True``if the key is inactivated."""
         return self.inactive is not None and self.inactive <= datetime.datetime.utcnow()
 
     @property
     def is_delete(self):
+        """``True``if the key is deleted."""
         return self.delete is not None and self.delete <= datetime.datetime.utcnow()
 
     @property
     def need_renew(self):
+        """``True`` is the current key needs to be renewed."""
         if self.type == "KSK":
             return (
                 self.activate is not None and
@@ -519,6 +561,7 @@ class Key(object):
             raise RuntimeError("impossible")
 
     def __init__(self, path):
+        """Parse the dnssec key file ``path``."""
         if not path.endswith(".private"):
             raise ValueError("%s is not a valid private key (should ends with .private)" % path)
         if not os.path.isfile(path):
@@ -593,6 +636,13 @@ class Key(object):
             raise ValueError("The key %s must have as list its Created field defined" % path)
 
     def __lt__(self, y):
+        """
+        Allow to compare two keys.
+
+        Comparison is done on the keys activation date is possible, if not on the publication
+        date, and finally, if not possible, on the creation date.
+        Keys always have a creation date.
+        """
         if not isinstance(y, Key):
             raise ValueError("can only compare two Keys")
         if self.activate is not None and y.activate is not None:

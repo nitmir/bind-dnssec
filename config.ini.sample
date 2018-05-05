@@ -1,5 +1,6 @@
 [dnssec]
-# Directory where dnssec keys will be stored
+# Directory where dnssec keys will be stored. This directory will contain on subdirectory per DNS
+# zone, containing dnssec keys.
 base_directory=/etc/bind/keys
 
 # Interval between 2 operations on the dns keys.
@@ -17,7 +18,6 @@ interval=23
 # dnssec_keys_management.py -c is called at least once a day.
 zsk_validity=30
 
-
 # Time after which a new KSK is generated and published for the zone (and activated after INTERVAL).
 # The old key is removed only INTERVAL after the new key was dnssec_keys_management.py --ds-seen.
 # This usually requires a manual operation with the registrar (publish DS of the new key
@@ -25,7 +25,9 @@ zsk_validity=30
 # to be called and has not yet be called
 ksk_validity=366
 
-# Algorithm used to generate new keys.
+# Algorithm used to generate new keys. Only the first created KSK and ZSK of a zone will use
+# this algorithm. Any renewed key will use the exact same parameters (name, algorithm, size,
+# and type) as the renewed key.
 # Valid algorithms are RSASHA256, RSASHA512, ECCGOST, ECDSAP256SHA256, ECDSAP384SHA384.
 algorithm=RSASHA256
 
