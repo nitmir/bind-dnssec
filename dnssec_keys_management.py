@@ -64,6 +64,13 @@ class Config(object):  # pylint: disable=locally-disabled,too-many-instance-attr
         14: "ECDSAP384SHA384",
     }
 
+    DS_ALGORITHMS = {
+        1: 'SHA-1',
+        2: 'SHA-256',
+        # 3: 'GOST', (not currently supported on debian)
+        4: 'SHA-384',
+    }
+
     # Size of the created KSK. Only the first created KSK of a zone will use this size.
     # Any renewed key will use the exact same parameters (name, algorithm, size, and type)
     # as the renewed key
@@ -192,7 +199,7 @@ class Config(object):  # pylint: disable=locally-disabled,too-many-instance-attr
                 )
 
 
-def get_zones(config=None, zone_names=None):
+def get_zones(zone_names=None, config=None):
     """
     Return a list of :class:`Zone` instances.
 
@@ -278,6 +285,7 @@ class Zone(object):
 
     def do_zsk(self):
         """Perform daily routine on ZSK keys (generate new keys, delete old ones...)."""
+        last_activate_zsk = None
         for zsk in self.ZSK:
             if zsk.is_activate and not zsk.is_inactive:
                 zsk.inactive = zsk.activate + self._cfg.ZSK_VALIDITY
@@ -290,8 +298,10 @@ class Zone(object):
             zsk.delete = zsk.inactive + self._cfg.INTERVAL
             zsk.gen_successor()
             bind_reload(self._cfg)
-        else:
+        elif last_activate_zsk is not None:
             zsk.activate = last_activate_zsk.inactive
+        else:
+            raise RuntimeError("No ZSK is activated, this should never happen")
 
     def do_ksk(self):
         """Perform daily routine on KSK keys (generate new keys...)."""
@@ -317,54 +327,80 @@ class Zone(object):
         parent = '.'.join(self.name.split('.')[1:])
         if not parent:
             parent = '.'
+        nameservers = {
+            ns: [ip.to_text() for ip in dns.resolver.query(ns)]
+            for ns in dns.resolver.query(parent, 'NS')
+        }
 
-        NS = [ns.to_text() for ns in dns.resolver.query(parent, 'NS')]
-        NS_IPS = {ns: [ip.to_text() for ip in dns.resolver.query(ns)] for ns in NS}
-
-        DS = {}
-        for ns, ns_ips in NS_IPS.items():
+        ds = {}
+        for ns, ns_ips in nameservers.items():
             for ns_ip in ns_ips:
                 r = dns.resolver.Resolver()
                 r.nameservers = [ns_ip]
-                DS[(ns, ns_ip)] = list(r.query(self.name, 'DS'))
-        return DS
+                ds[(ns, ns_ip)] = list(r.query(self.name, 'DS'))
+        return ds
 
-    def ds_check(self, keyid):
+    def ds_check(self, keyid, key=None):
         """Check if a DS with ``keyid`` is present in the parent zone."""
         if dns is None:
-            print("Python dnspython module not availabled, check failed")
+            print("Python dnspython module not availabled, check failed", file=sys.stderr)
             return False
-        ok = True
-        dses = self._get_ds_from_parents()
-        missings = collections.defaultdict(list)
-        founds = {}
-        for (ns, ns_ip), ds in dses.items():
-            keyids = set()
-            for d in ds:
-                if d.key_tag == keyid:
-                    break
-                keyids.add(d.key_tag)
+        if key is None:
+            key = self._get_key_by_id(keyid)[0]
+        if key is not None:
+            dses = self._get_ds_from_parents()
+            missings = collections.defaultdict(list)
+            bad_digest = collections.defaultdict(list)
+            founds = {}
+            for (ns, ns_ip), ds in dses.items():
+                keyids = set()
+                for d in ds:
+                    if d.key_tag == keyid:
+                        if key is None:
+                            break
+                        algorithm = self._cfg.DS_ALGORITHMS[d.digest_type]
+                        if d.digest == key.ds_digest(algorithm):
+                            break
+                        else:
+                            bad_digest[ns].append(ns_ip)
+                            break
+                    keyids.add(d.key_tag)
+                else:
+                    missings[ns].append(ns_ip)
+                    founds[(ns, ns_ip)] = keyids
+            if missings or bad_digest:
+                if missings:
+                    print("DS not found on the following parent servers:", file=sys.stderr)
+                    keyids = None
+                    for ns, ns_ips in missings.items():
+                        print(" * %s (%s)" % (ns, ', '.join(ns_ips)), file=sys.stderr)
+                        for ip in ns_ips:
+                            if keyids is None:
+                                keyids = founds[(ns, ip)]
+                            else:
+                                keyids &= founds[(ns, ip)]
+                    keyids_list = list(keyids)
+                    keyids_list.sort()
+                    print(
+                        "Found keys are %s" % ', '.join(str(id_) for id_ in keyids_list),
+                        file=sys.stderr
+                    )
+                if bad_digest:
+                    print(
+                        "DS found but digest do not match on the following parent servers:",
+                        file=sys.stderr
+                    )
+                    for ns, ns_ips in bad_digest.items():
+                        print(" * %s (%s)" % (ns, ', '.join(ns_ips)), file=sys.stderr)
+                return False
             else:
-                missings[ns].append(ns_ip)
-                founds[(ns, ns_ip)] = keyids
-                ok = False
-        if not ok:
-            print(
-                "DS for %s key %s not found on the following parent servers:" % (self.name, keyid)
-            )
-            for ns, ns_ips in missings.items():
-                print(" * %s (%s)" % (ns, ', '.join(ns_ips)))
-                for ip in ns_ips:
-                    keyids &= founds[(ns, ip)]
-            keyids_list = list(keyids)
-            keyids_list.sort()
-            print("Found keys are %s" % ', '.join(str(id_) for id_ in keyids_list))
+                print("DS for key %s found on all parent servers" % keyid)
+                return True
         else:
-            print("DS for key %s found on all parent servers" % keyid)
-        return ok
+            print("Key not found", file=sys.stderr)
+            return False
 
-    def ds_seen(self, keyid, check=True):
-        """Tell that the DS for the KSK ``keyid`` has been seen, programming KSK rotation."""
+    def _get_key_by_id(self, keyid):
         old_ksks = []
         for ksk in self.KSK:
             if ksk.keyid == keyid:
@@ -372,23 +408,33 @@ class Zone(object):
                 break
             old_ksks.append(ksk)
         else:
+
+            return None, []
+        return seen_ksk, old_ksks
+
+    def ds_seen(self, keyid, check=True):
+        """Tell that the DS for the KSK ``keyid`` has been seen, programming KSK rotation."""
+        seen_ksk, old_ksks = self._get_key_by_id(keyid)
+        if seen_ksk is not None:
+            if check:
+                if not self.ds_check(keyid, key=seen_ksk):
+                    print(
+                        "You may use --no-check to bypass this check and force --ds-seen",
+                        file=sys.stderr
+                    )
+                    return
+            now = datetime.datetime.utcnow()
+            if seen_ksk.activate is None:
+                seen_ksk.activate = (now + self._cfg.INTERVAL)
+            for ksk in old_ksks:
+                print(" * program key %s removal" % ksk.keyid)
+                # set inactive in at least INTERVAL
+                ksk.inactive = seen_ksk.activate
+                # delete INTERVAL after being inactive
+                ksk.delete = ksk.inactive + self._cfg.INTERVAL
+            bind_reload(self._cfg)
+        else:
             print("Key not found", file=sys.stderr)
-            return
-        print("Key %s found" % keyid)
-        if check:
-            if not self.ds_check(keyid):
-                print("You may use --no-check to bypass this check and force --ds-seen")
-                return
-        now = datetime.datetime.utcnow()
-        if seen_ksk.activate is None:
-            seen_ksk.activate = (now + self._cfg.INTERVAL)
-        for ksk in old_ksks:
-            print(" * program key %s removal" % ksk.keyid)
-            # set inactive in at least INTERVAL
-            ksk.inactive = seen_ksk.activate
-            # delete INTERVAL after being inactive
-            ksk.delete = ksk.inactive + self._cfg.INTERVAL
-        bind_reload(self._cfg)
 
     def remove_deleted(self):
         """Move deleted keys to the deleted folder."""
@@ -402,10 +448,10 @@ class Zone(object):
         for key in self.ZSK + self.KSK:
             key.remove_deleted(deleted_path, now=now)
 
-    def ds(self):
+    def ds(self, algorithm=None):
         """Display the DS of the KSK of the zone."""
         for ksk in self.KSK:
-            ksk.ds()
+            sys.stdout.write(ksk.ds(algorithm=algorithm))
 
     def key(self, show_ksk=False, show_zsk=False):
         """Display the public keys of the KSK and/or ZSK."""
@@ -424,7 +470,7 @@ class Zone(object):
             format_string += "{created!s:^19}|"
         format_string += "{!s:^19}|{!s:^19}|{!s:^19}|{!s:^19}|"
         separator = ("+" + "-" * znl + "+-+-----+" + ("-" * 19 + "+") * (6 if show_all else 4))
-        return (format_string, separator)
+        return format_string, separator
 
     @classmethod
     def _key_table_header(cls, znl, show_all=False):
@@ -502,7 +548,7 @@ class Zone(object):
                     else:
                         raise RuntimeError("impossible")
                 except ValueError as error:
-                    print("%s" % error, sys.stderr)
+                    print("%s" % error, file=sys.stderr)
         self.ZSK.sort()
         self.KSK.sort()
         if not self.ZSK:
@@ -586,6 +632,7 @@ class Key(object):
         :param str typ: The type of the key to create. Most be 'KSK' or 'ZSK'.
         :param str name: The zone name for which we are creating the key.
         :param list options: An optional list of extra parameters to pass to DNSSEC_KEYGEN binary.
+        :param Config config: A :class:`Config` object
         """
         if config is None:
             config = Config()
@@ -626,7 +673,7 @@ class Key(object):
         if p.returncode != 0:
             raise ValueError("err %s: %s" % (p.returncode, err))
         if err:
-            print(err)
+            print(err, file=sys.stderr)
         bind_chown(os.path.dirname(self._path))
 
     def settime(self, flag, date):
@@ -758,11 +805,22 @@ class Key(object):
         else:
             raise RuntimeError("impossible")
 
-    def ds(self):
+    def ds(self, algorithm=None):
         """Display the DS of the key."""
-        cmd = [self._cfg.DNSSEC_DSFROMKEY, self._path]
-        p = subprocess.Popen(cmd)
+        cmd = [self._cfg.DNSSEC_DSFROMKEY]
+        if algorithm is not None:
+            cmd.extend(['-a', algorithm])
+        cmd.append(self._path)
+        p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        out, err = p.communicate()
         p.wait()
+        if err:
+            raise ValueError(err.decode('utf-8').strip())
+        return out.decode('utf-8')
+
+    def ds_digest(self, algorithm):
+        ds = self.ds(algorithm)
+        return binascii.a2b_hex(ds.split()[-1])
 
     def remove_deleted(self, deleted_path, now=None):
         """Move deleted keys to the deleted folder."""
@@ -894,7 +952,7 @@ class Key(object):
         return isinstance(y, Key) and y._path == self._path
 
 
-def parse_arguments():
+def parse_arguments(config):
     """Parse command ligne arguments."""
     parser = argparse.ArgumentParser()
     parser.add_argument('zone', nargs='*', help='A dns zone name.')
@@ -917,7 +975,7 @@ def parse_arguments():
     )
     parser.add_argument(
         '--ds',
-        action='store_true',
+        choices=list(config.DS_ALGORITHMS.values()) + ['all'],
         help='Show KSK DS for each supplied zone or for all zones if no zone supplied'
     )
     parser.add_argument(
@@ -937,7 +995,7 @@ def parse_arguments():
         help=(
             'To call with the ID of a new KSK published in the parent zone. '
             'Programs old KSK removal. '
-            'If will check that the KSK key id appear in one DS of each servers of the parent '
+            'If will check that the KSK DS appear on each servers of the parent '
             'zone, except if called with --no-check.'
         )
     )
@@ -952,9 +1010,7 @@ def parse_arguments():
         type=int,
         help=(
             'To call with the ID of a KSK published in the parent zone. '
-            'Check that the KSK key id appear in one DS of each servers of the parent zone. '
-            'Note that this just check for key id, it not not check that the DS digest mach '
-            'the KSK. '
+            'Check that the KSK DS appear on each servers of the parent zone. '
         )
     )
     parser.add_argument(
@@ -972,16 +1028,16 @@ def parse_arguments():
 
 def main():  # pylint: disable=locally-disabled,too-many-branches
     """Run functions based on command ligne arguments."""
-    parser = parse_arguments()
-    args = parser.parse_args()
     config = Config()
+    parser = parse_arguments(config)
+    args = parser.parse_args()
     zones = args.zone
     if args.show_config:
         config.show()
     if args.make:
         for zone in zones:
             Zone.create(zone, config=config)
-    zones = get_zones(zones if zones else None)
+    zones = get_zones(zones if zones else None, config=config)
     if args.nsec3:
         for zone in zones:
             zone.nsec3()
@@ -1002,7 +1058,11 @@ def main():  # pylint: disable=locally-disabled,too-many-branches
             zone.remove_deleted()
     if args.ds:
         for zone in zones:
-            zone.ds()
+            if args.ds == 'all':
+                for algo in config.DS_ALGORITHMS.values():
+                    zone.ds(algo)
+            else:
+                zone.ds(args.ds)
     if args.key:
         for zone in zones:
             zone.key(show_ksk=args.key in ["all", "ksk"],
@@ -1019,5 +1079,5 @@ def main():  # pylint: disable=locally-disabled,too-many-branches
 if __name__ == '__main__':
     try:
         main()
-    except (ValueError, IOError) as error:
-        sys.exit("%s\n" % error)
+    except (ValueError, IOError) as main_error:
+        sys.exit("%s" % main_error)
