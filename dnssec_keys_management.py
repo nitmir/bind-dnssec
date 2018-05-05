@@ -62,7 +62,7 @@ class Config(object):  # pylint: disable=locally-disabled,too-many-instance-attr
     DS_ALGORITHMS = {
         1: 'SHA-1',
         2: 'SHA-256',
-        # 3: 'GOST', (not currently supported on debian)
+        3: 'GOST',
         4: 'SHA-384',
     }
 
@@ -816,7 +816,7 @@ class Key(object):
         out, err = p.communicate()
         p.wait()
         if err:
-            raise ValueError(err.decode('utf-8').strip())
+            print(err.decode('utf-8').strip(), file=sys.stderr)
         return out.decode('utf-8')
 
     def ds_digest(self, algorithm):
