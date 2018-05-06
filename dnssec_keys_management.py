@@ -451,7 +451,11 @@ class Zone(object):
     def ds(self, algorithm=None):
         """Display the DS of the KSK of the zone."""
         for ksk in self.KSK:
-            sys.stdout.write(ksk.ds(algorithm=algorithm))
+            if algorithm == 'all':
+                for algo in self._cfg.DS_ALGORITHMS.values():
+                    sys.stdout.write(ksk.ds(algorithm=algo))
+            else:
+                sys.stdout.write(ksk.ds(algorithm=algorithm))
 
     def key(self, show_ksk=False, show_zsk=False):
         """Display the public keys of the KSK and/or ZSK."""
@@ -1060,11 +1064,7 @@ def main():  # pylint: disable=locally-disabled,too-many-branches
             zone.remove_deleted()
     if args.ds:
         for zone in zones:
-            if args.ds == 'all':
-                for algo in config.DS_ALGORITHMS.values():
-                    zone.ds(algo)
-            else:
-                zone.ds(args.ds)
+            zone.ds(args.ds)
     if args.key:
         for zone in zones:
             zone.key(show_ksk=args.key in ["all", "ksk"],
