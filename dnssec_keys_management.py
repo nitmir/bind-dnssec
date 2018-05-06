@@ -331,9 +331,7 @@ class Zone(object):
             )
 
     def _get_ds_from_parents(self):
-        parent = '.'.join(self.name.split('.')[1:])
-        if not parent:
-            parent = '.'
+        parent = '.'.join(self.name.split('.')[1:]) + '.'
         nameservers = {
             ns.to_text(): [ip.to_text() for ip in dns.resolver.query(ns.to_text())]
             for ns in dns.resolver.query(parent, 'NS')
