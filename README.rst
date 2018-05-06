@@ -1,6 +1,8 @@
 Bind9 DNSSEC keys management
 ############################
 
+|licence| |codacy|
+
 Since version 9.7, BIND9 added support for auto-dnssec. After initial configuration,
 servers using auto-dnssec will automatically sign and re-sign zones at the appropriate time as
 determined by key metadata. However, keys generation and rotation planning is left to the
@@ -284,3 +286,10 @@ scheduling KSK rotation, but you can skip the tests with the ``--no-check`` opti
 Beware that with the ``--no-check`` keys will be rotate whether the DS are published in the
 parent zone or not. Use it very carefully.
 
+
+
+.. |licence| image:: https://badges.genua.fr/github/license/nitmir/bind-dnssec.svg
+    :target: https://www.gnu.org/licenses/gpl-3.0.html
+
+.. |codacy| image:: https://badges.genua.fr/codacy/grade/a262f8980c514d85951f89f4e7b47916/master.svg
+    :target: https://app.codacy.com/app/valentin-samir/bind-dnssec

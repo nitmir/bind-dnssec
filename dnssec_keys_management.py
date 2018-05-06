@@ -1,5 +1,17 @@
 #!/usr/bin/env python3
 # -*- coding: utf8 -*-
+# This program is distributed in the hope that it will be useful, but WITHOUT
+# ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+# FOR A PARTICULAR PURPOSE. See the GNU General Public License version 3 for
+# more details.
+#
+# You should have received a copy of the GNU General Public License version 3
+# along with this program; if not, write to the Free Software Foundation, Inc., 51
+# Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+#
+# (c) 2015-2018 Valentin Samir
+# (c) 2017 Hamza Dely
+#
 # pylint: disable=locally-disabled,invalid-name
 """The script allow to manage bind dnssec keys (generate new keys and handle key rollover)."""
 import os
