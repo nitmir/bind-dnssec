@@ -26,8 +26,14 @@ import configparser
 from functools import total_ordering
 try:
     import dns.resolver
+    try:
+        dns.resolver.resolve
+        dns_resolve_meth = "resolve"
+    except AttributeError:
+        dns_resolve_meth = "query"
 except ImportError:
     dns = None
+    dns_resolve_meth = None
 
 
 class Config(object):  # pylint: disable=locally-disabled,too-many-instance-attributes
@@ -332,9 +338,10 @@ class Zone(object):
 
     def _get_ds_from_parents(self):
         parent = '.'.join(self.name.split('.')[1:]) + '.'
+        resolve = getattr(dns.resolver, dns_resolve_meth)
         nameservers = {
-            ns.to_text(): [ip.to_text() for ip in dns.resolver.query(ns.to_text())]
-            for ns in dns.resolver.query(parent, 'NS')
+            ns.to_text(): [ip.to_text() for ip in resolve(ns.to_text())]
+            for ns in resolve(parent, 'NS')
         }
 
         ds = {}
@@ -342,7 +349,11 @@ class Zone(object):
             for ns_ip in ns_ips:
                 r = dns.resolver.Resolver()
                 r.nameservers = [ns_ip]
-                ds[(ns, ns_ip)] = list(r.query(self.name, 'DS'))
+                resolve = getattr(r, dns_resolve_meth)
+                try:
+                    ds[(ns, ns_ip)] = list(resolve(self.name, 'DS'))
+                except dns.resolver.NoAnswer:
+                    ds[(ns, ns_ip)] = []
         return ds
 
     def ds_check(self, keyid, key=None):
@@ -391,10 +402,16 @@ class Zone(object):
                                 keyids &= founds[(ns, ip)]
                     keyids_list = list(keyids)
                     keyids_list.sort()
-                    print(
-                        "Found keys are %s" % ', '.join(str(id_) for id_ in keyids_list),
-                        file=sys.stderr
-                    )
+                    if keyids_list:
+                        print(
+                            "Found keys are %s" % ', '.join(str(id_) for id_ in keyids_list),
+                            file=sys.stderr
+                        )
+                    else:
+                        print(
+                            "No key found",
+                            file=sys.stderr
+                        )
                 if bad_digest:
                     print(
                         "DS found but digest do not match on the following parent servers:",
